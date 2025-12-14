@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  voice-clone-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.voice-clone-server
+    ports:
+      - "5005:5005"
+    environment:
+      - COQUI_TOS_AGREED=1
+      - COQUI_DISABLE_TOS_PROMPT=1
+    #restart: unless-stopped
+
+  streamlit-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - OLLAMA_MODEL=gemma2:2b
+      - XTTS_SERVER_URL=http://voice-clone-server:5005
+    restart: unless-stopped

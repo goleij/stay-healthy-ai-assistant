@@ -1,0 +1,26 @@
+# --- CORE for XTTS v2 ---
+TTS @ git+https://github.com/coqui-ai/TTS.git
+
+# --- Model ecosystem (compatible versions) ---
+transformers==4.35.2
+tokenizers==0.14.1
+huggingface_hub==0.17.3
+
+# --- PyTorch (MUSS 2.1 sein, NICHT höher!) ---
+torch==2.1.0
+torchaudio==2.1.0
+torchvision==0.16.0
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# --- Audio processing ---
+numpy
+scipy==1.11.2
+soundfile==0.12.1
+pydub==0.25.1
+
+# --- Server ---
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+
+# --- Runtime ---
+onnxruntime==1.17.0

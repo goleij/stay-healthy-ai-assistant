@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+
+# Chroma DB (RAG database)
+chroma_db/
+
+#JSON Files
+*.json
+
+# meditation data
+meditation_data/

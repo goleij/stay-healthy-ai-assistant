@@ -1,0 +1,19 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Git + Compiler installieren, damit TTS aus Source gebaut werden kann
+RUN apt-get update && \
+    apt-get install -y git build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements_vcs.txt ./
+RUN pip install -r requirements_vcs.txt
+
+COPY voice-clone-server ./voice-clone-server
+
+ENV COQUI_TOS_AGREED=1
+ENV COQUI_DISABLE_TOS_PROMPT=1
+
+CMD ["uvicorn", "voice-clone-server.server:app", "--host", "0.0.0.0", "--port", "5005"]
+
