@@ -12,6 +12,7 @@ from profile_ui import render_profile_page
 from profile_ui.Recepies.library_ui import render_library_page
 from app_css import inject_sidebar_css
 from meditation import render_meditation_page
+from wishboard.wishboard_ui import render_wishboard_chat
 
 st.set_page_config(
     page_title="Stay Healthy AI",
@@ -104,7 +105,7 @@ elif page == "meditation":
     render_meditation_page()
 
 elif page == "wishboard":
-    st.info("Wish board page coming soon...")
+     render_wishboard_chat()
 
 elif page == "settings":
     st.info("Settings page coming soon...")
