@@ -22,4 +22,5 @@ services:
       - OLLAMA_HOST=http://host.docker.internal:11434
       - OLLAMA_MODEL=gemma2:2b
       - XTTS_SERVER_URL=http://voice-clone-server:5005
+      - VOICE_CLONE_URL=http://voice-clone-server:5005/synthesize_meditation
     restart: unless-stopped
