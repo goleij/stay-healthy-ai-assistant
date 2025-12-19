@@ -12,6 +12,16 @@ services:
       - COQUI_DISABLE_TOS_PROMPT=1
     #restart: unless-stopped
 
+  tts_server:
+      build:
+        context: ./tts_server
+        dockerfile: Dockerfile
+      ports:
+        - "5006:5005"
+      environment:
+        COQUI_TOS_AGREED: "1"
+        COQUI_DISABLE_TOS_PROMPT: "1"
+
   streamlit-app:
     build:
       context: .
@@ -23,4 +33,5 @@ services:
       - OLLAMA_MODEL=gemma2:2b
       - XTTS_SERVER_URL=http://voice-clone-server:5005
       - VOICE_CLONE_URL=http://voice-clone-server:5005/synthesize_meditation
+      - RECIPE_TTS_URL=http://tts_server:5005/speak
     restart: unless-stopped

@@ -13,6 +13,7 @@ from profile_ui.Recepies.library_ui import render_library_page
 from app_css import inject_sidebar_css
 from meditation import render_meditation_page
 from wishboard.wishboard_ui import render_wishboard_chat
+from plan.plan_ui import render_plan_tab
 
 st.set_page_config(
     page_title="Stay Healthy AI",
