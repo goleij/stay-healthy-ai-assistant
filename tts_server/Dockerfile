@@ -3,7 +3,6 @@ FROM python:3.10-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 
-# System-Abhängigkeiten
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libgl1 \
@@ -11,13 +10,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# pip sauber upgraden
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
-
-# 🔒 PyTorch – XTTS-kompatibel
-RUN pip install --no-cache-dir \
-    torch==1.13.1 \
-    torchaudio==0.13.1
 
 # 🔒 Transformers + Tokenizers – EXAKT passend
 RUN pip install --no-cache-dir \
@@ -34,14 +27,16 @@ RUN pip install --no-cache-dir \
     fastapi \
     uvicorn
 
-# Voice Sample & Server
+# ✅ IMPORTANT: force torch AFTER TTS (TTS can upgrade torch)
+RUN pip install --no-cache-dir \
+    "torch<2.6" \
+    "torchaudio<2.6"
+
 COPY voice_samples /voices
 COPY server.py /app/server.py
 
-# Coqui TOS
 ENV COQUI_TOS_AGREED=1
 ENV COQUI_DISABLE_TOS_PROMPT=1
 
 EXPOSE 5005
-
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "5005"]
