@@ -22,7 +22,7 @@ def speak(req: SpeakRequest):
     tts.tts_to_file(
         text=req.text,
         speaker_wav=VOICE_SAMPLE,
-        language="de",
+        language="en",
         file_path=tmp.name,
     )
 

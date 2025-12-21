@@ -3,6 +3,7 @@ from ollama._types import ResponseError
 import wave
 import contextlib
 import tempfile
+import os
 
 from storage.profile_manager import save_state_for_current_user
 from llm_utils import get_llm
@@ -16,14 +17,20 @@ from .plan_css import inject_plan_css, inject_plan_toggle_css
 from audio.recipe_parser import extract_meal_item, split_meals
 from audio.recipe_llm import generate_recipe_steps
 from audio.tts_coqui import speak
+from audio.music_mixer import mix_tts_with_music
+
+
+# ------------------- KONSTANTEN -------------------
+INTENSITY_MUSIC = {
+    "low": "assets/music/low.mp3",
+    "medium": "assets/music/medium.mp3",
+    "high": "assets/music/high.mp3",
+}
 
 
 # --------------------------------------------------
 def concat_wavs(wav_paths: list[str]) -> str:
-    """
-    Fügt mehrere WAV-Dateien zu einer einzigen zusammen,
-    damit Streamlit sie korrekt als ein Audio abspielen kann.
-    """
+    """Fügt mehrere WAV-Dateien zu einer einzigen zusammen."""
     if not wav_paths:
         return None
 
@@ -53,6 +60,7 @@ def _build_workout_schedule(workout_days: int, total_days: int = 7):
     return schedule
 
 
+# --------------------------------------------------
 def split_plan_into_diet_and_workout(plan_text: str):
     diet, workout = [], []
     mode = None
@@ -104,9 +112,8 @@ def _render_plan_by_day(markdown_text: str, label: str):
 
                 btn_key = f"btn_play_{label}_{day_idx}_{meal_name}"
 
-                # 🍽️ EIN Button: Rezept generieren & komplett anhören
-                if st.button("🍽️ Rezept generieren & anhören", key=btn_key):
-                    with st.spinner("Rezept wird generiert und vertont …"):
+                if st.button("Voice Mode", key=btn_key):
+                    with st.spinner("Voice Mode wird erstellt und vertont …"):
                         meal_item = extract_meal_item(meal_block)
 
                         steps = generate_recipe_steps(
@@ -115,18 +122,40 @@ def _render_plan_by_day(markdown_text: str, label: str):
                         )
 
                         if not steps:
-                            st.error("❌ Rezept konnte nicht generiert werden.")
+                            st.error("Voice Mode konnte nicht generiert werden.")
                             return
 
+                        intensity = st.session_state.get("intensity", "medium")
+                        music_path = INTENSITY_MUSIC[intensity]
+
                         wav_files = []
+                        temp_files = []
+
                         for step in steps:
-                            wav_files.append(speak(step))
+                            tts_wav = speak(step)
+                            temp_files.append(tts_wav)
+
+                            mixed = mix_tts_with_music(
+                                tts_wav_path=tts_wav,
+                                music_path=music_path,
+                                music_gain_db=-22 if intensity == "low" else -18,
+                            )
+
+                            wav_files.append(mixed)
+                            temp_files.append(mixed)
 
                         final_audio = concat_wavs(wav_files)
 
                     if final_audio:
                         st.success("🔊 Audio bereit")
                         st.audio(final_audio, autoplay=True)
+
+                        # 🧹 Cleanup (SEHR WICHTIG)
+                        for f in temp_files:
+                            try:
+                                os.remove(f)
+                            except:
+                                pass
 
 
 # --------------------------------------------------
@@ -136,6 +165,25 @@ def render_plan_tab(model_name: str):
     inject_plan_css()
     st.subheader("Your personalized fitness & diet plan")
 
+    # -------- Intensität (User Choice) --------
+    if "intensity" not in st.session_state:
+        st.session_state["intensity"] = "medium"
+
+    INTENSITY_LABELS = {
+        "Low (Stretch / Mobility)": "low",
+        "Medium (Strength)": "medium",
+        "High (HIIT / Cardio)": "high",
+    }
+
+    label = st.select_slider(
+        "Workout-Intensität",
+        options=list(INTENSITY_LABELS.keys()),
+        value="Medium (Strength)",
+    )
+
+    st.session_state["intensity"] = INTENSITY_LABELS[label]
+
+    # -----------------------------------------
     profile = st.session_state.get("profile")
     if not profile:
         st.warning("No profile found.")
@@ -178,6 +226,17 @@ def render_plan_tab(model_name: str):
             horizontal=True,
             label_visibility="collapsed",
         )
+
+        # -------- Musik beim Wechsel zu Workout --------
+        if "last_view" not in st.session_state:
+            st.session_state.last_view = None
+
+        if st.session_state.last_view != view and view == "Workout":
+            intensity = st.session_state.get("intensity", "medium")
+            st.audio(INTENSITY_MUSIC[intensity], autoplay=True)
+
+        st.session_state.last_view = view
+        # ----------------------------------------------
 
         if view == "Meals":
             _render_plan_by_day(diet, "Meals")

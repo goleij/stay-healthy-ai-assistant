@@ -12,12 +12,10 @@ RUN apt-get update && apt-get install -y \
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# 🔒 Transformers + Tokenizers – EXAKT passend
 RUN pip install --no-cache-dir \
     transformers==4.35.2 \
     tokenizers==0.14.1
 
-# 🔒 Coqui TTS + Runtime-Abhängigkeiten
 RUN pip install --no-cache-dir \
     TTS \
     librosa \
@@ -25,9 +23,9 @@ RUN pip install --no-cache-dir \
     scipy \
     soundfile \
     fastapi \
-    uvicorn
+    uvicorn \
+    pydub
 
-# ✅ IMPORTANT: force torch AFTER TTS (TTS can upgrade torch)
 RUN pip install --no-cache-dir \
     "torch<2.6" \
     "torchaudio<2.6"
