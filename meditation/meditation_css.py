@@ -251,6 +251,108 @@ body, .stApp, .stApp p, .stMarkdown, .stMarkdown p, .meditation-text, .stTextInp
 :root {
   --primary-color: #009245 !important;
 }
+
+
+/* ========================================
+   MOBILE FIXES — TOUCH INTERACTION SUPPORT
+   ======================================== */
+
+@media (max-width: 768px) {
+
+    /* Allgemein: Vergrößerte Touch-Ziele */
+    .stButton > button,
+    .stSlider .rc-slider-handle,
+    input[type="text"],
+    textarea {
+        touch-action: manipulation;
+    }
+
+    /* Buttons: kein Hover auf Mobile → ersetze durch Active/Focus */
+    .stButton > button:active,
+    .stButton > button:focus-visible {
+        background: #f8c42c !important;
+        color: #23233a !important;
+        border: 3px solid #f8c42c !important;
+    }
+
+    /* Slider: Handle für mobile Geräte größer machen */
+    .stSlider .rc-slider-handle {
+        width: 1.2rem !important;
+        height: 1.2rem !important;
+        margin-top: -6px !important;
+    }
+
+    /* Slider beim "Touch" simuliert Hover */
+    .stSlider .rc-slider-handle:active {
+        background: #f8c42c !important;
+        border-color: #f8c42c !important;
+    }
+
+    /* Slider-Track größer machen */
+    .stSlider .rc-slider-track {
+        height: 6px !important;
+    }
+    .stSlider .rc-slider-rail {
+        height: 6px !important;
+    }
+
+    /* Text Inputs: mobile-friendly padding */
+    input[type="text"],
+    textarea,
+    .stTextInput > div > input,
+    .stTextArea > div > textarea {
+        font-size: 18px !important;
+        padding: 0.9em !important;
+    }
+
+    /* Radio Buttons – Touch-optimiert */
+    .stRadio [data-baseweb="radio"] > div {
+        padding: 6px 10px !important;
+    }
+    .stRadio label {
+        padding-left: 6px !important;
+        font-size: 18px !important;
+    }
+
+    /* Headings etwas kompakter, aber gut lesbar */
+    h1 { font-size: 26px !important; }
+    h2 { font-size: 22px !important; }
+    h3 { font-size: 19px !important; }
+
+    /* Main Container enger, sonst wirkt es gequetscht */
+    .stApp .main > div {
+        max-width: 100% !important;
+        padding: 0 12px !important;
+    }
+
+    /* Hintergrund-SVG kürzer damit keine Überdeckung */
+    .meditation-bg-svg {
+        height: 160px !important;
+    }
+}
+
+/* =======================================
+   MOBILE TOUCH FIX — DEACTIVATE HOVER
+   ======================================= */
+@media (hover: none) and (pointer: coarse) {
+
+    /* Hover auf Mobile deaktivieren */
+    .stButton > button:hover {
+        background: #009245 !important;
+        color: #fff !important;
+        border: none !important;
+    }
+
+    /* Stattdessen: aktiver Touch simuliert Hover-Effekt */
+    .stButton > button:active,
+    .stButton > button:focus-visible {
+        background: #f8c42c !important;
+        color: #23233a !important;
+        border: 3px solid #f8c42c !important;
+    }
+}
+
+
 </style>
 
 

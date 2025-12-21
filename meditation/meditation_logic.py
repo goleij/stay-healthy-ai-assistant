@@ -1,3 +1,12 @@
+"""
+meditation_logic.py
+===================
+
+Logik für die Meditationserstellung, Textgenerierung, Audio-Mix und Persistenz.
+
+Dieses Modul bietet Funktionen zur Generierung von Meditationstexten, zur Erzeugung und Mischung von Audio (TTS + Ambient),
+sowie zum Speichern und Laden von Meditationen.
+"""
 from __future__ import annotations
 
 import io
@@ -44,10 +53,19 @@ DATA_DIR.mkdir(exist_ok=True)
 
 @dataclass
 class MeditationConfig:
-    category: str        # "Mindfulness", "Breathing", "Body Scan", "Sleep"
-    length: str          # "short", "medium", "long"
-    ambient_style: str   # "waves", "forest", "rain", "none"
-    music_volume_db: int # typischer Bereich: -30 .. +5
+    """
+    Konfigurationsdaten für eine Meditation.
+
+    Attributes:
+        category: Kategorie der Meditation (z.B. "Mindfulness", "Breathing", ...)
+        length: Länge der Meditation ("short", "medium", "long")
+        ambient_style: Ambient-Stil ("waves", "forest", "rain", "none")
+        music_volume_db: Lautstärke des Hintergrunds in dB (-30 bis +5 typisch)
+    """
+    category: str
+    length: str
+    ambient_style: str
+    music_volume_db: int
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +149,10 @@ _LENGTH_MULTIPLIER = {
 
 
 def _pick_sentences(pool: List[str], count: int) -> List[str]:
+    """
+    Wählt eine bestimmte Anzahl Sätze aus einer Liste aus, ggf. mit Wiederholung.
+    Die Reihenfolge ist zufällig.
+    """
     if count <= 0:
         return []
     if len(pool) <= count:
@@ -144,7 +166,13 @@ def _pick_sentences(pool: List[str], count: int) -> List[str]:
 def generate_meditation_text(category: str, length: str) -> str:
     """
     Baut einen mehrabschnittigen Meditationstext zusammen.
-    Rückgabe: ein String mit Leerzeile zwischen Absätzen.
+
+    Args:
+        category: Kategorie der Meditation (z.B. "Mindfulness")
+        length: Länge der Meditation ("short", "medium", "long")
+
+    Returns:
+        Ein String mit Leerzeile zwischen Absätzen.
     """
     cat = category if category in _INTRO_TEMPLATES else "Mindfulness"
     length_key = length if length in _LENGTH_MULTIPLIER else "medium"
@@ -183,6 +211,12 @@ def _call_voice_clone_server(text: str) -> bytes:
     """
     Ruft den lokalen XTTS-Server auf und gibt WAV-Bytes zurück.
     Erwartet FastAPI-Endpoint bei VOICE_CLONE_URL, der audio/wav liefert.
+
+    Args:
+        text: Der zu sprechende Text.
+
+    Returns:
+        WAV-Bytes (16-bit PCM)
     """
     resp = requests.post(
         VOICE_CLONE_URL,
@@ -201,6 +235,14 @@ def _generate_ambient_noise(
     """
     Erzeugt ein einfaches Ambient-Signal (float32 in [-1, 1]).
     Verschiedene Styles = verschiedene "Färbung" des Rauschens.
+
+    Args:
+        style: Ambient-Stil ("waves", "forest", "rain", ...)
+        num_samples: Anzahl der Samples
+        sample_rate: Abtastrate
+
+    Returns:
+        Array mit Audiodaten (float32)
     """
     noise = np.random.normal(0.0, 0.3, size=num_samples).astype(np.float32)
     t = np.linspace(0.0, num_samples / sample_rate, num_samples, endpoint=False)
@@ -229,6 +271,13 @@ def _load_ambient_file(style: str, sample_rate: int) -> Tuple[Optional[np.ndarra
     """
     Lädt eine Ambient-Datei aus dem ./ambient Ordner und gibt float32-Samples [-1,1] zurück.
     Fällt auf None zurück, wenn Datei fehlt oder pydub nicht installiert ist.
+
+    Args:
+        style: Ambient-Stil
+        sample_rate: Ziel-Abtastrate
+
+    Returns:
+        (Samples als float32, Warnung oder None)
     """
     if AudioSegment is None:
         return None, "pydub not installed; using synthetic ambient."
@@ -254,7 +303,17 @@ def _build_ambient_track(
     num_samples: int,
     sample_rate: int,
 ) -> Tuple[Optional[np.ndarray], Optional[str]]:
-    """Versucht reale Ambient-Loops zu nutzen, fällt sonst auf Rauschen zurück."""
+    """
+    Versucht reale Ambient-Loops zu nutzen, fällt sonst auf synthetisches Rauschen zurück.
+
+    Args:
+        style: Ambient-Stil
+        num_samples: Anzahl der Samples
+        sample_rate: Abtastrate
+
+    Returns:
+        (Samples als float32, Warnung oder None)
+    """
     style_key = (style or "waves").lower()
 
     file_audio, warning = _load_ambient_file(style_key, sample_rate)
@@ -280,6 +339,14 @@ def _mix_voice_and_ambient(
     """
     Mischt TTS-Stimme mit Ambient-Noise und gibt neue WAV-Bytes zurück.
     Nur stdlib + numpy.
+
+    Args:
+        voice_wav: WAV-Bytes der Stimme
+        ambient_style: Ambient-Stil
+        music_volume_db: Lautstärke des Hintergrunds in dB
+
+    Returns:
+        (Gemischte WAV-Bytes, Warnung oder None)
     """
     voice_buf = io.BytesIO(voice_wav)
     with wave.open(voice_buf, "rb") as vf:
@@ -340,9 +407,14 @@ def create_meditation_audio(
     music_volume_db: int = -18,
 ) -> Tuple[Optional[bytes], Optional[str]]:
     """
-    High-Level-Helper für die UI.
+    High-Level-Helper für die UI. Erstellt eine Meditation als Audio (TTS + Ambient).
 
-    Rückgabe:
+    Args:
+        text: Meditationstext
+        ambient_style: Ambient-Stil
+        music_volume_db: Lautstärke des Hintergrunds in dB
+
+    Returns:
         (audio_bytes, error_message)
     """
     try:
@@ -371,6 +443,10 @@ INDEX_FILE = DATA_DIR / "meditations.json"
 
 
 def _load_index() -> Dict[str, Dict[str, str]]:
+    """
+    Lädt das Index-File mit den gespeicherten Meditationen.
+    Returns ein Dict mit Slugs als Keys.
+    """
     if not INDEX_FILE.exists():
         return {}
     try:
@@ -380,6 +456,9 @@ def _load_index() -> Dict[str, Dict[str, str]]:
 
 
 def _save_index(index: Dict[str, Dict[str, str]]) -> None:
+    """
+    Speichert das Index-File für Meditationen.
+    """
     INDEX_FILE.write_text(
         json.dumps(index, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -392,6 +471,15 @@ def save_meditation(
     text: str,
     audio_bytes: Optional[bytes],
 ) -> None:
+    """
+    Speichert eine Meditation (Text und Audio) und aktualisiert den Index.
+
+    Args:
+        title: Titel der Meditation
+        config: MeditationConfig-Objekt
+        text: Meditationstext
+        audio_bytes: Optional, Audio als WAV-Bytes
+    """
     index = _load_index()
     slug = title.strip() or "untitled"
     slug = slug.replace("/", "_")
@@ -411,6 +499,10 @@ def save_meditation(
 
 
 def list_saved_meditations() -> List[Dict[str, str]]:
+    """
+    Listet alle gespeicherten Meditationen mit Metadaten auf.
+    Returns eine Liste von Dicts mit Slug und Metadaten.
+    """
     index = _load_index()
     return [
         {"slug": slug, **meta}
@@ -419,6 +511,15 @@ def list_saved_meditations() -> List[Dict[str, str]]:
 
 
 def load_meditation(slug: str) -> Tuple[str, Optional[bytes]]:
+    """
+    Lädt eine gespeicherte Meditation (Text und ggf. Audio) anhand des Slugs.
+
+    Args:
+        slug: Slug der Meditation
+
+    Returns:
+        (Text, Audio-Bytes oder None)
+    """
     text_path = DATA_DIR / f"{slug}.txt"
     audio_path = DATA_DIR / f"{slug}.wav"
 
@@ -428,6 +529,12 @@ def load_meditation(slug: str) -> Tuple[str, Optional[bytes]]:
 
 
 def delete_meditation(slug: str) -> None:
+    """
+    Löscht eine gespeicherte Meditation (Text, Audio und Index-Eintrag).
+
+    Args:
+        slug: Slug der Meditation
+    """
     index = _load_index()
     index.pop(slug, None)
     _save_index(index)
@@ -443,4 +550,7 @@ def delete_meditation(slug: str) -> None:
 
 # Backwards-compat Wrapper
 def generate_meditation(category: str, length: str) -> str:
+    """
+    Wrapper für generate_meditation_text (aus Kompatibilitätsgründen).
+    """
     return generate_meditation_text(category, length)

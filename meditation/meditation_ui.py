@@ -1,3 +1,11 @@
+
+"""
+meditation_ui.py
+================
+
+UI-Komponenten für das Meditation Studio (Streamlit).
+Erlaubt das Erstellen, Anhören, Speichern und Verwalten von Meditationen.
+"""
 from __future__ import annotations
 
 from typing import Optional
@@ -17,6 +25,9 @@ from .meditation_logic import (
 
 
 def _init_state() -> None:
+    """
+    Initialisiert die Streamlit Session State Variablen für das Meditation Studio.
+    """
     state = st.session_state
     state.setdefault("med_category", "Mindfulness")
     state.setdefault("med_length", "medium")
@@ -29,8 +40,10 @@ def _init_state() -> None:
 
 
 def _category_selector() -> None:
+    """
+    Zeigt die Kategorie-Auswahl für die Meditation an.
+    """
     st.markdown("#### Style")
-
     st.radio(
         "",
         ("Mindfulness", "Breathing", "Sleep"),
@@ -42,6 +55,9 @@ def _category_selector() -> None:
 
 
 def _length_selector() -> None:
+    """
+    Zeigt die Längenauswahl für die Meditation an.
+    """
     st.markdown("#### Length")
     st.radio(
         "",
@@ -54,6 +70,9 @@ def _length_selector() -> None:
 
 
 def _ambient_selector() -> None:
+    """
+    Zeigt die Auswahl für den Ambient-Stil an.
+    """
     st.markdown("#### Ambient Style")
     st.radio(
         "",
@@ -65,12 +84,11 @@ def _ambient_selector() -> None:
     )
 
 
-def _sidebar_nav() -> str:
-    # Deprecated: Navigation now in main area as tabs
-    return None
-
 
 def _render_new_meditation() -> None:
+    """
+    Zeigt das UI für das Erstellen und Speichern einer neuen Meditation.
+    """
 
     col_left, col_right = st.columns(2)
 
@@ -161,6 +179,9 @@ def _render_new_meditation() -> None:
 
 
 def _render_saved_meditations() -> None:
+    """
+    Zeigt die gespeicherten Meditationen mit Optionen zum Anhören, Laden und Löschen.
+    """
     st.markdown("### Saved Meditations")
 
     items = list_saved_meditations()
@@ -200,6 +221,9 @@ def _render_saved_meditations() -> None:
 
 
 def render_meditation_page() -> None:
+    """
+    Hauptfunktion zum Rendern der Meditation Studio Seite (Tabs, Navigation, Hauptlogik).
+    """
     inject_meditation_css()
     _init_state()
 
