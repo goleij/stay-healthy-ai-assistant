@@ -24,7 +24,7 @@ except Exception:  # noqa: BLE001
 # Configuration
 # ---------------------------------------------------------------------------
 
-# FastAPI-Server für XTTS (läuft bei dir in voice-clone-server)
+# FastAPI-Server für XTTS (läuft bei dir in voice_clone_server)
 
 VOICE_CLONE_URL = os.getenv(
     "VOICE_CLONE_URL",

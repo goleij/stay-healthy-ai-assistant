@@ -21,7 +21,7 @@ def _init_state() -> None:
     state.setdefault("med_category", "Mindfulness")
     state.setdefault("med_length", "medium")
     state.setdefault("med_ambient", "forest")
-    state.setdefault("med_music_db", -20)
+    state.setdefault("med_music_db", 0)
     state.setdefault("med_text", "")
     state.setdefault("med_audio", None)
     state.setdefault("med_last_error", None)
@@ -31,15 +31,14 @@ def _init_state() -> None:
 def _category_selector() -> None:
     st.markdown("#### Style")
 
-    cols = st.columns(4)
-    labels = ["Mindfulness", "Breathing", "Body Scan", "Sleep"]
-
-    for col, label in zip(cols, labels):
-        with col:
-            is_selected = st.session_state.med_category == label
-            button_label = f"✅ {label}" if is_selected else label
-            if st.button(button_label, use_container_width=True, key=f"cat_{label}"):
-                st.session_state.med_category = label
+    st.radio(
+        "",
+        ("Mindfulness", "Breathing", "Sleep"),
+        index=("Mindfulness", "Breathing", "Sleep").index(st.session_state.med_category),
+        key="med_category",
+        horizontal=True,
+        label_visibility="collapsed",
+    )
 
 
 def _length_selector() -> None:
@@ -67,18 +66,11 @@ def _ambient_selector() -> None:
 
 
 def _sidebar_nav() -> str:
-    with st.sidebar:
-        st.markdown("## 🧘 Meditation Studio")
-        choice = st.radio(
-            "",
-            ("New Meditation", "Saved Meditations"),
-            label_visibility="collapsed",
-        )
-    return choice
+    # Deprecated: Navigation now in main area as tabs
+    return None
 
 
 def _render_new_meditation() -> None:
-    st.markdown("### Create a new guided meditation")
 
     col_left, col_right = st.columns(2)
 
@@ -135,7 +127,7 @@ def _render_new_meditation() -> None:
         )
 
     if st.session_state.med_audio:
-        st.markdown("#### 🔊 Preview Audio")
+        st.markdown("#### 🔊 Play Audio")
         st.audio(st.session_state.med_audio, format="audio/wav")
 
     st.markdown("---")
@@ -211,9 +203,37 @@ def render_meditation_page() -> None:
     inject_meditation_css()
     _init_state()
 
-    page = _sidebar_nav()
+    st.markdown("## Meditation Studio")
+    if "med_tab" not in st.session_state:
+        st.session_state["med_tab"] = "New Meditation"
 
-    if page == "New Meditation":
+    # Two super wide buttons, line underneath
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Neue Meditation", key="tab_new_meditation", use_container_width=True):
+            st.session_state["med_tab"] = "New Meditation"
+        st.markdown(f"""
+<style>
+div[data-testid='column']:has(button[data-testid='baseButton'][aria-label='Neue Meditation']) button[data-testid='baseButton'][aria-label='Neue Meditation'] {{
+    {'border: 3px solid #23233a !important;' if st.session_state['med_tab'] == 'New Meditation' else ''}
+    {'box-shadow: 0 0 0 2px #23233a33;' if st.session_state['med_tab'] == 'New Meditation' else ''}
+}}
+</style>
+""", unsafe_allow_html=True)
+    with col2:
+        if st.button("Gespeicherte Meditationen", key="tab_saved_meditations", use_container_width=True):
+            st.session_state["med_tab"] = "Saved Meditations"
+        st.markdown(f"""
+<style>
+div[data-testid='column']:has(button[data-testid='baseButton'][aria-label='Gespeicherte Meditationen']) button[data-testid='baseButton'][aria-label='Gespeicherte Meditationen'] {{
+    {'border: 3px solid #23233a !important;' if st.session_state['med_tab'] == 'Saved Meditations' else ''}
+    {'box-shadow: 0 0 0 2px #23233a33;' if st.session_state['med_tab'] == 'Saved Meditations' else ''}
+}}
+</style>
+""", unsafe_allow_html=True)
+    st.markdown('<hr style="margin-top: -0.5rem; margin-bottom: 1.5rem; border: 1.5px solid #e0e0e0;">', unsafe_allow_html=True)
+
+    if st.session_state["med_tab"] == "New Meditation":
         _render_new_meditation()
     else:
         _render_saved_meditations()
