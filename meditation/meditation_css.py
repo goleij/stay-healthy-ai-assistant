@@ -4,9 +4,32 @@ MEDITATION_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css?family=Roboto:400,700&display=swap');
 
-/* Slider-Track (Linie) grün */
+/* ============================
+   STREAMLIT SLIDER — FULL GREEN
+   ============================ */
+
+/* 1) Value bubble ("-13") */
+div[data-testid="stSliderThumbValue"] {
+    color: #009245 !important;
+    font-weight: 700 !important;
+}
+
+/* 2) Active track (left part of the slider) */
 .stSlider .rc-slider-track {
     background-color: #009245 !important;
+}
+
+/* 3) Handle */
+.stSlider .rc-slider-handle {
+    background: #009245 !important;
+    border-color: #009245 !important;
+    box-shadow: 0 0 0 2px #00924533 !important;
+}
+.stSlider .rc-slider-handle:hover,
+.stSlider .rc-slider-handle:active,
+.stSlider .rc-slider-handle:focus {
+    background: #f8c42c !important;
+    border-color: #f8c42c !important;
 }
 
 /* Slider Value-Label (Zahl über dem Handle) grün */
@@ -229,6 +252,8 @@ body, .stApp, .stApp p, .stMarkdown, .stMarkdown p, .meditation-text, .stTextInp
   --primary-color: #009245 !important;
 }
 </style>
+
+
 """
 
 def inject_meditation_css():
