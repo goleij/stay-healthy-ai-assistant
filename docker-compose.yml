@@ -1,12 +1,12 @@
 version: '3.8'
 
 services:
-  voice-clone-server:
+  voice_clone_server:
     build:
       context: .
-      dockerfile: Dockerfile.voice-clone-server
+      dockerfile: Dockerfile.voice_clone_server
     ports:
-      - "5005:5005"
+      - "5008:5008"
     environment:
       - COQUI_TOS_AGREED=1
       - COQUI_DISABLE_TOS_PROMPT=1
@@ -31,7 +31,7 @@ services:
     environment:
       - OLLAMA_HOST=http://host.docker.internal:11434
       - OLLAMA_MODEL=gemma2:2b
-      - XTTS_SERVER_URL=http://voice-clone-server:5005
-      - VOICE_CLONE_URL=http://voice-clone-server:5005/synthesize_meditation
+      - XTTS_SERVER_URL=http://voice_clone_server:5005
+      - VOICE_CLONE_URL=http://voice_clone_server:5008/synthesize_meditation
       - RECIPE_TTS_URL=http://tts_server:5005/speak
     restart: unless-stopped

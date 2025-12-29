@@ -138,7 +138,7 @@ On the first run:
 3.1. Start the voice cloning Server for the meditation and other voice modes
 
     create venv with python 3.10
-    `cd voice-clone-server
+    `cd voice_clone_server
     python3.10 -m venv .venv
     source .venv/bin/activate
     pip install --upgrade pip

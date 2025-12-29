@@ -37,7 +37,7 @@ except Exception:  # noqa: BLE001
 
 VOICE_CLONE_URL = os.getenv(
     "VOICE_CLONE_URL",
-    "http://127.0.0.1:5005/synthesize_meditation",
+    "http://voice_clone_server:5008/synthesize_meditation",
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

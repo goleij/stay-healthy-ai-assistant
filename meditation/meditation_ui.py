@@ -1,4 +1,3 @@
-
 """
 meditation_ui.py
 ================
@@ -11,6 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from .meditation_css import inject_meditation_css
 from .meditation_logic import (
@@ -45,12 +45,12 @@ def _category_selector() -> None:
     """
     st.markdown("#### Style")
     st.radio(
-        "",
-        ("Mindfulness", "Breathing", "Sleep"),
+        label="Style",
+        options=("Mindfulness", "Breathing", "Sleep"),
         index=("Mindfulness", "Breathing", "Sleep").index(st.session_state.med_category),
         key="med_category",
         horizontal=True,
-        label_visibility="collapsed",
+        label_visibility="collapsed",  # Entferne diese Zeile, wenn das Label sichtbar sein soll
     )
 
 
@@ -60,12 +60,11 @@ def _length_selector() -> None:
     """
     st.markdown("#### Length")
     st.radio(
-        "",
-        ("short", "medium", "long"),
-        index=("short", "medium", "long").index(st.session_state.med_length),
+        label="Length",
+        options=("short", "medium", "long"),
         key="med_length",
         horizontal=True,
-        label_visibility="collapsed",
+        label_visibility="collapsed",  # Entferne diese Zeile, wenn das Label sichtbar sein soll
     )
 
 
@@ -75,9 +74,8 @@ def _ambient_selector() -> None:
     """
     st.markdown("#### Ambient Style")
     st.radio(
-        "",
-        ("waves", "forest", "rain", "none"),
-        index=("waves", "forest", "rain", "none").index(st.session_state.med_ambient),
+        label="Ambient Style",
+        options=("waves", "forest", "rain", "none"),
         key="med_ambient",
         horizontal=True,
         label_visibility="collapsed",
@@ -103,13 +101,12 @@ def _render_new_meditation() -> None:
             "",
             min_value=-30,
             max_value=5,
-            value=st.session_state.med_music_db,
-            step=1,
             key="med_music_db",
+            step=1,
             label_visibility="collapsed",
         )
 
-    if st.button("✨ Generate Meditation", type="primary"):
+    if st.button("Generate Meditation", type="primary"):
         cfg = MeditationConfig(
             category=st.session_state.med_category,
             length=st.session_state.med_length,
@@ -136,7 +133,7 @@ def _render_new_meditation() -> None:
         st.warning(st.session_state.med_last_error)
 
     if st.session_state.med_text:
-        st.markdown("#### 📝 Meditation Text")
+        st.markdown("#### Meditation Text")
         st.text_area(
             "",
             value=st.session_state.med_text,
@@ -145,7 +142,7 @@ def _render_new_meditation() -> None:
         )
 
     if st.session_state.med_audio:
-        st.markdown("#### 🔊 Play Audio")
+        st.markdown("#### Play Audio")
         st.audio(st.session_state.med_audio, format="audio/wav")
 
     st.markdown("---")
@@ -157,7 +154,7 @@ def _render_new_meditation() -> None:
         placeholder="e.g., Evening Forest Calm",
     )
 
-    if st.button("💾 Save Meditation"):
+    if st.button("Save Meditation"):
         if not st.session_state.med_text:
             st.error("Please generate a meditation before saving.")
         elif not st.session_state.med_title.strip():

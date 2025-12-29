@@ -10,10 +10,10 @@ RUN apt-get update && \
 COPY requirements_vcs.txt ./
 RUN pip install -r requirements_vcs.txt
 
-COPY voice-clone-server ./voice-clone-server
+COPY voice_clone_server ./voice_clone_server
 
 ENV COQUI_TOS_AGREED=1
 ENV COQUI_DISABLE_TOS_PROMPT=1
 
-CMD ["uvicorn", "voice-clone-server.server:app", "--host", "0.0.0.0", "--port", "5005"]
+CMD ["uvicorn", "voice_clone_server.server:app", "--host", "0.0.0.0", "--port", "5008"]
 

@@ -1,7 +1,9 @@
 import streamlit as st
 
+
 MEDITATION_CSS = """
 <style>
+@import url("https://fonts.googleapis.com/icon?family=Material+Icons");
 @import url('https://fonts.googleapis.com/css?family=Roboto:400,700&display=swap');
 
 /* ============================
@@ -353,6 +355,29 @@ body, .stApp, .stApp p, .stMarkdown, .stMarkdown p, .meditation-text, .stTextInp
 }
 
 
+/* ============================
+   FIX: Material Icons override
+   ============================ */
+
+.material-icons,
+.material-symbols-rounded,
+.material-symbols-outlined,
+.material-symbols-sharp,
+[class*="material-symbols"],
+[class*="material-icons"],
+.st-emotion-cache-pd6qx2,
+.st-emotion-cache-17hxo5v {
+    font-family: 'Material Icons', 'Material Symbols Rounded', 'Material Symbols Outlined', 'Material Symbols Sharp' !important;
+    font-style: normal !important;
+    font-weight: normal !important;
+    font-size: inherit;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    direction: ltr;
+    -webkit-font-smoothing: antialiased;
+}
 </style>
 
 
