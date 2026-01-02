@@ -1,142 +1,282 @@
-# wishboard_ui.py (optimierte Version mit Ernährungsstilen)
+# wishboard_ui.py (optimiert: Ernährungsstile + Health Guardrails pro User)
 
 import os
 import html
 import json
-import requests
-from typing import List, Dict
+import re
 
 import streamlit as st
 from . import wishboard_css as css
 
-#Verbindet Chat mit Nutzerprofil
-#Einziger Zugriffspunkt auf Profildaten
 
+# ---------------------------------------------------------
+# Profil laden
+# ---------------------------------------------------------
 def load_user_profile(username: str) -> dict:
     """
-    Lädt das Profil eines Nutzers aus profiles.json.
-    Wird für personalisierte KI-Antworten verwendet.
+    Lädt das Profil eines Nutzers aus profiles.json (robust, egal wo gestartet wird).
     """
     try:
-        with open("profiles.json", "r", encoding="utf-8") as f:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        profile_path = os.path.join(base_dir, "..", "profiles.json")
+
+        with open(profile_path, "r", encoding="utf-8") as f:
             data = json.load(f)
+
         return data.get(username, {}).get("profile", {})
-    except Exception:
+    except Exception as e:
+        print("Profil-Ladefehler:", e)
         return {}
 
 
+# ---------------------------------------------------------
+# Profil-Normalisierung
+# ---------------------------------------------------------
+def _normalize_list(x) -> list[str]:
+    if x is None:
+        return []
+    if isinstance(x, list):
+        return [str(i).strip() for i in x if str(i).strip()]
+    if isinstance(x, str):
+        s = x.strip()
+        if not s:
+            return []
+        return [s]
+    return [str(x).strip()]
 
+
+def _normalize_allergies(profile: dict) -> list[str]:
+    """
+    Allergien/Unverträglichkeiten können String oder Liste sein.
+    Gibt eine Liste lower-case tokens zurück.
+    """
+    a = profile.get("allergies", "")
+    items = _normalize_list(a)
+    # Splitte auch "Gluten, Nüsse" etc.
+    out = []
+    for it in items:
+        for part in re.split(r"[,;/|]+", it):
+            p = part.strip().lower()
+            if p:
+                out.append(p)
+    return list(dict.fromkeys(out))
+
+
+def _get_conditions(profile: dict) -> list[str]:
+    """
+    Krankheiten/Diagnosen:
+    - health_conditions (Liste oder String)
+    - health_issues (Freitext)
+    -> normalisiert auf lower-case tokens
+    """
+    cond = _normalize_list(profile.get("health_conditions"))
+    issues = str(profile.get("health_issues", "") or "").strip()
+    if issues:
+        cond.append(issues)
+
+    # Splitte grob auf Trennzeichen
+    out = []
+    for it in cond:
+        for part in re.split(r"[,;/|]+", it):
+            p = part.strip().lower()
+            if p:
+                out.append(p)
+    return list(dict.fromkeys(out))
 
 
 # ---------------------------------------------------------
-# ask_ollama – Schnittstelle zur KI
+# Health Rules (erweiterbar)
 # ---------------------------------------------------------
-# ZWECK:
-# Sendet einen Prompt an das lokale LLM (Ollama)
-# und zeigt die Antwort LIVE im UI an.
-# TECHNIK:
-# - HTTP POST Request
-# - Streaming Response (Server-Sent Events)
-# - JSON-Chunks werden nacheinander verarbeitet
+# Idee: Wir matchen "keys" als Substring in conditions/allergies.
+# Du kannst hier jederzeit neue Krankheiten ergänzen.
+HEALTH_RULES = {
+    # --- Diabetes / Prädiabetes ---
+    "diabetes": {
+        "prompt_rules": [
+            "KEIN zugesetzter Zucker (kein Honig, Ahornsirup, Agave, Sirup, Marmelade, gezuckerte Produkte).",
+            "Wenn süß: nur Erythrit oder Stevia oder gar keine Süße.",
+            "Bevorzuge ballaststoffreiche Zutaten, Low-GI/Low-GL.",
+            "Ziel: <= 25g Kohlenhydrate pro Portion. Wenn nicht möglich, biete eine Alternative mit weniger Carbs an.",
+        ],
+        "block_terms": ["zucker", "honig", "ahornsirup", "agave", "sirup", "marmelade", "gezuckert", "kondensmilch", "cola", "limonade"],
+    },
+    "prädiabetes": {  # alias
+        "prompt_rules": [
+            "KEIN zugesetzter Zucker (kein Honig, Ahornsirup, Agave, Sirup).",
+            "Bevorzuge ballaststoffreiche Zutaten, Low-GI/Low-GL.",
+            "Ziel: <= 30g Kohlenhydrate pro Portion.",
+        ],
+        "block_terms": ["zucker", "honig", "ahornsirup", "agave", "sirup", "marmelade", "gezuckert"],
+    },
+
+    # --- Zöliakie / Gluten ---
+    "gluten": {
+        "prompt_rules": [
+            "100% glutenfrei. Keine Zutaten mit Weizen/Roggen/Gerste/Dinkel/Seitan.",
+            "Nutze glutenfreie Alternativen (Reis, Mais, Buchweizen, Hirse, Kartoffeln, glutenfreie Haferflocken).",
+        ],
+        "block_terms": ["weizen", "roggen", "gerste", "dinkel", "seitan", "bulgur", "couscous", "panko", "paniermehl", "weizenmehl"],
+    },
+    "zöliakie": {  # alias
+        "prompt_rules": [
+            "100% glutenfrei. Keine Zutaten mit Weizen/Roggen/Gerste/Dinkel/Seitan.",
+        ],
+        "block_terms": ["weizen", "roggen", "gerste", "dinkel", "seitan", "bulgur", "couscous", "panko", "paniermehl", "weizenmehl"],
+    },
+
+    # --- Reflux / GERD (konservativ) ---
+    "reflux": {
+        "prompt_rules": [
+            "Magenfreundlich: vermeide sehr fettig, sehr scharf, viel Zitrus, sehr tomatenlastig, Minze und große Mengen Schokolade.",
+        ],
+        "block_terms": ["chili", "jalapeno", "sehr scharf", "scharf", "tomatensauce", "zitrone", "orange", "minze"],
+    },
+    "gerd": {  # alias
+        "prompt_rules": [
+            "Magenfreundlich: vermeide sehr fettig, sehr scharf, viel Zitrus, sehr tomatenlastig, Minze.",
+        ],
+        "block_terms": ["chili", "jalapeno", "scharf", "tomatensauce", "zitrone", "orange", "minze"],
+    },
+
+    # --- Hypertonie / Bluthochdruck (konservativ) ---
+    "bluthochdruck": {
+        "prompt_rules": [
+            "Salzarm kochen, vermeide stark verarbeitete Lebensmittel und sehr salzige Zutaten.",
+            "Nutze Kräuter/Gewürze statt viel Salz.",
+        ],
+        "block_terms": ["salami", "speck", "wurst", "chips", "salzstangen", "fertigsauce", "tütensuppe", "instant"],
+    },
+    "hypertonie": {  # alias
+        "prompt_rules": [
+            "Salzarm kochen, vermeide stark verarbeitete Lebensmittel und sehr salzige Zutaten.",
+        ],
+        "block_terms": ["salami", "speck", "wurst", "chips", "salzstangen", "fertigsauce", "tütensuppe", "instant"],
+    },
+
+    # --- Laktose (Allergie/Intoleranz) ---
+    "laktose": {
+        "prompt_rules": [
+            "Laktosefrei: verwende laktosefreie Milchprodukte oder pflanzliche Alternativen.",
+        ],
+        "block_terms": ["milch", "sahne", "joghurt", "quark", "käse", "butter"],
+    },
+
+    # --- Nuss-Allergie (konservativ) ---
+    "nuss": {
+        "prompt_rules": [
+            "Nussfrei: keine Nüsse, kein Nussmus, keine Spuren-Zutaten wie Mandelmehl/Erdnussbutter.",
+        ],
+        "block_terms": ["mandel", "haselnuss", "walnuss", "cashew", "erdnuss", "pistazie", "nuss", "nussmus", "erdnussbutter", "mandelmehl"],
+    },
+}
+
+
+def build_health_guardrails(profile: dict) -> dict:
+    """
+    Baut aus Allergien + Diagnosen eine konsolidierte Menge an:
+    - prompt_rules: Regeln, die in den Prompt müssen
+    - block_terms: Begriffe, die wir im Output/RAG blocken
+    - tags: gematchte Schlüssel (für Debug/Transparenz, optional)
+    """
+    allergies = _normalize_allergies(profile)
+    conditions = _get_conditions(profile)
+
+    # Allergien als Bedingungen “mappen” (z.B. "Gluten" -> gluten)
+    # Außerdem: wenn Allergien genau Krankheitsschlüssel enthalten (z.B. "laktose").
+    merged = conditions + allergies
+
+    prompt_rules: list[str] = []
+    block_terms: list[str] = []
+    tags: list[str] = []
+
+    for item in merged:
+        for key, rule in HEALTH_RULES.items():
+            if key in item:
+                tags.append(key)
+                prompt_rules.extend(rule.get("prompt_rules", []))
+                block_terms.extend(rule.get("block_terms", []))
+
+    # Duplikate entfernen
+    tags = list(dict.fromkeys(tags))
+    prompt_rules = list(dict.fromkeys(prompt_rules))
+    block_terms = list(dict.fromkeys(block_terms))
+
+    return {"prompt_rules": prompt_rules, "block_terms": block_terms, "tags": tags}
+
+
+def violates_guardrails(text: str, guardrails: dict) -> bool:
+    """
+    Prüft ob Text gegen block_terms verstößt.
+    (Heuristik, aber sehr effektiv in der Praxis.)
+    """
+    t = (text or "").lower()
+    return any(term in t for term in guardrails.get("block_terms", []))
+
+
+# ---------------------------------------------------------
+# ask_ollama – Schnittstelle zur KI (über get_llm)
 # ---------------------------------------------------------
 def ask_ollama(prompt: str, model: str = "gemma2:2b") -> str:
-    buffer = ""
     try:
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={"model": model, "prompt": prompt},
-            stream=True,
-            timeout=60,
-        )
-        response.raise_for_status()
+        from llm_utils import get_llm
 
-        for line in response.iter_lines():
-            if not line:
-                continue
-            try:
-                data = json.loads(line.decode("utf-8"))
-            except Exception:
-                continue
+        llm = get_llm(model)
+        if hasattr(llm, "invoke"):
+            result = llm.invoke(prompt)
+        else:
+            result = llm(prompt)
 
-            chunk = data.get("response", "")
-            if chunk:
-                buffer += chunk
-
-        return buffer.strip()
+        return str(result).strip()
 
     except Exception as e:
         return f"Fehler bei Ollama: {e}"
 
 
-
 # ---------------------------------------------------------
-# Rezept-Erkennung (damit RAG nur dann genutzt wird)
-# ZWECK:
-# Erkennt, ob die Nutzereingabe wahrscheinlich
-# eine Essens- oder Rezeptanfrage ist.
-# RAG Soll nur ausgeführt werden, wenn es Sinn macht
-#
-# TECHNIK:
-# - Keyword-basierte Heuristik
+# Rezept-Erkennung
 # ---------------------------------------------------------
 def is_recipe_request(text: str) -> bool:
     text = text.lower()
 
     recipe_keywords = [
-        # Allgemeine Koch-/Backverben
         "rezept", "koch", "koche", "kochen",
         "backe", "backen", "zubereitung", "zutaten",
         "gericht", "essen", "mahlzeit", "snack",
         "ich will", "ich möchte", "mach", "mache",
 
-        # Sweets & Desserts
         "muffins", "kuchen", "brownies", "donuts",
         "eis", "ice", "icecream", "nicecream",
         "dessert", "nachtisch", "pudding",
         "torte", "cupcakes", "gummibärchen",
         "schokolade", "kekse", "cookies",
 
-        # Snacks
         "chips", "cracker", "popcorn",
         "wrap", "sandwich", "toast",
 
-        # Herzhaftes
         "pizza", "burger", "lasagne",
         "pasta", "nudeln", "spaghetti",
         "risotto", "auflauf", "salat",
 
-        # Protein/Savory
         "hähnchen", "chicken", "pute",
         "lachs", "fisch", "thunfisch",
         "rind", "hackfleisch",
 
-        # Bowls & Healthy Foods
         "bowl", "smoothie", "shake",
         "overnight oats", "porridge",
 
-        # Sonstiges Essen
         "frühstück", "mittagessen", "abendessen",
         "snackidee", "snack ideen",
 
-        # Generische Essenswörter
-        "gericht", "kochst", "rezepte", "idee",
+        "rezepte", "idee",
     ]
-    # True, sobald ein Schlüsselwort gefunden wird
+
     return any(k in text for k in recipe_keywords)
 
 
 # ---------------------------------------------------------
-# Ernährungsstil-Erkennung (Low-Carb, High-Protein, Vegan usw.)
-#Zweck: Prompt Kontrolle, Konsistente, gezielte KI-Ausgaben.
-#Technik: regelbasierte Klassifikation.
+# Ernährungsstil-Erkennung
 # ---------------------------------------------------------
 def detect_recipe_style(text: str) -> str:
-    """
-    Versucht aus der Nutzeranfrage einen gewünschten Ernährungsstil zu erkennen.
-    Rückgabe ist einer dieser Strings:
-    'lowcarb', 'highprotein', 'vegan', 'zuckerfrei',
-    'lowfat', 'glutenfrei', 'paleo', 'keto', 'healthy'
-    """
     t = text.lower()
 
     if "keto" in t:
@@ -156,18 +296,12 @@ def detect_recipe_style(text: str) -> str:
     if "low fat" in t or "fettarm" in t or "fett-arm" in t:
         return "lowfat"
 
-    # Standard: gesund, aber ohne speziellen Stil
     return "healthy"
 
 
 # ---------------------------------------------------------
 # Profil-Kontext für KI-Prompts
 # ---------------------------------------------------------
-# Wandelt ein Nutzerprofil in Text um,
-# der der KI als Kontext übergeben wird.
-# Personalisierte Rezepte
-# Berücksichtigung von Ziel, Aktivität, Allergien
-
 def build_profile_context(profile: dict) -> str:
     if not profile:
         return ""
@@ -186,76 +320,78 @@ Nutzerprofil:
 - Allergien: {profile.get('allergies')}
 
 Gesundheitliche Aspekte:
-- Krankheiten / Diagnosen: {", ".join(health_conditions) if health_conditions else "keine bekannt"}
+- Krankheiten / Diagnosen: {", ".join(health_conditions) if isinstance(health_conditions, list) and health_conditions else (health_conditions if health_conditions else "keine bekannt")}
 - Gesundheitliche Probleme: {health_issues if health_issues else "keine"}
-- Einschränkungen: {", ".join(limitations) if limitations else "keine"}
-"""
-
-
+- Einschränkungen: {", ".join(limitations) if isinstance(limitations, list) and limitations else (limitations if limitations else "keine")}
+""".strip()
 
 
 # ---------------------------------------------------------
 # RAG-Relevanzprüfung
 # ---------------------------------------------------------
-# ZWECK:
-# Prüft, ob ein gefundenes Rezept wirklich
-# zur Anfrage des Nutzers passt.
-#
-# Damit keine Falsche Rezepte gezeigt werden und für Antwortqualität
-# ---------------------------------------------------------
-
 def is_relevant_to_query(recipe_text: str, user_query: str) -> bool:
-    """Prüft, ob das RAG-Rezept thematisch zur Anfrage passt."""
     q = user_query.lower().strip()
     t = recipe_text.lower()
-
-    # Wichtige Wörter extrahieren
     words = [w for w in q.split() if len(w) > 3]
-
-    # Wenn kein Wort im Rezept vorkommt → nicht relevant
     return any(w in t for w in words)
 
+
 # ---------------------------------------------------------
-# KI: Gesundes Rezept im gewünschten Stil erzeugen
-# ZWECK:
-# Erstellt ein komplett neues, gesundes Rezept,
-# wenn kein passendes RAG-Ergebnis existiert.
+# KI: Gesundes Rezept im gewünschten Stil erzeugen (mit Guardrails + Auto-Repair)
 # ---------------------------------------------------------
 def generate_styled_recipe(user_text: str, style: str, profile: dict) -> str:
     style_descriptions = {
-        "lowcarb": "ein gesundes Low-Carb Rezept (sehr wenige Kohlenhydrate, kein Industriezucker)",
-        "highprotein": "ein gesundes High-Protein Rezept (viel Eiweiß, wenig Fett, kein Industriezucker)",
+        "lowcarb": "ein gesundes Low-Carb Rezept (wenige Kohlenhydrate)",
+        "highprotein": "ein gesundes High-Protein Rezept (viel Eiweiß, ausgewogen)",
         "vegan": "ein gesundes veganes Rezept (keine tierischen Produkte, vollwertige Zutaten)",
-        "zuckerfrei": "ein gesundes zuckerfreies Rezept (kein Haushaltszucker, nur Stevia/Erythrit oder natürliche Süße)",
+        "zuckerfrei": "ein gesundes zuckerfreies Rezept (kein Haushaltszucker)",
         "lowfat": "ein gesundes fettarmes Rezept (wenig Fett, leichte Zutaten)",
-        "glutenfrei": "ein gesundes glutenfreies Rezept (ohne Gluten, mit verträglichen Alternativen)",
-        "paleo": "ein gesundes Paleo-Rezept (unverarbeitete Lebensmittel, kein Zucker, kein Getreide)",
-        "keto": "ein gesundes Keto-Rezept (sehr wenige Kohlenhydrate, viel gute Fette, moderates Protein)",
-        "healthy": "ein gesundes, ausgewogenes Rezept (natürliche Zutaten, wenig Zucker und wenig Fett)",
+        "glutenfrei": "ein gesundes glutenfreies Rezept (ohne Gluten, mit Alternativen)",
+        "paleo": "ein gesundes Paleo-Rezept (unverarbeitet, kein Getreide, kein Zucker)",
+        "keto": "ein gesundes Keto-Rezept (sehr wenige Kohlenhydrate, gute Fette)",
+        "healthy": "ein gesundes, ausgewogenes Rezept (natürliche Zutaten)",
     }
 
     desc = style_descriptions.get(style, style_descriptions["healthy"])
-
-    # Profil-Kontext für die KI erzeugen
     profile_context = build_profile_context(profile)
+    guard = build_health_guardrails(profile)
 
-    # Prompt inklusive Nutzerprofil bauen
+    # Health-Regeln in Prompt
+    health_rules_text = ""
+    if guard["prompt_rules"]:
+        health_rules_text = "Gesundheits-Regeln (strikt einhalten):\n" + "\n".join(f"- {r}" for r in guard["prompt_rules"])
+
     prompt = (
-            profile_context +
-            "\nDu bist ein gesunder Ernährungscoach.\n"
-            f"Erstelle ein passendes Rezept für: {user_text}\n\n"
-            "Vorgaben:\n"
-            "- Das Rezept MUSS zum Nutzerprofil passen.\n"
-            "- Berücksichtige Ziel, Aktivitätslevel, Allergien und gesundheitliche Einschränkungen.\n"
-            "- Vermeide Zutaten oder Zubereitungen, die für den Nutzer ungeeignet sein könnten.\n"
-            "- Antworte NUR mit folgendem Format:\n"
-            "Zutaten:\n"
-            "- ...\n\n"
-            "Zubereitung:\n"
-            "1. ...\n"
+        (profile_context + "\n\n" if profile_context else "")
+        + "Du bist ein gesunder Ernährungscoach.\n"
+        + f"Erstelle {desc} für: {user_text}\n\n"
+        + "Vorgaben:\n"
+        + "- Das Rezept MUSS zum Nutzerprofil passen.\n"
+        + "- Berücksichtige Ziel, Aktivitätslevel, Allergien und gesundheitliche Einschränkungen.\n"
+        + "- Wenn eine Diagnose unklar ist oder du unsicher bist: vermeide riskante Zutaten und schlage eine sichere Alternative vor.\n"
+        + (health_rules_text + "\n\n" if health_rules_text else "")
+        + "- Antworte NUR mit folgendem Format:\n"
+        + "Zutaten:\n"
+        + "- ...\n\n"
+        + "Zubereitung:\n"
+        + "1. ...\n"
     )
 
-    return ask_ollama(prompt)
+    out = ask_ollama(prompt)
+
+    # Auto-Repair, falls Output gegen Guardrails verstößt
+    if guard["block_terms"] and violates_guardrails(out, guard):
+        fix_prompt = (
+            "Korrigiere das folgende Rezept so, dass es die Gesundheits-Regeln strikt einhält.\n"
+            "Entferne/ersetze alle problematischen Zutaten.\n"
+            "Gib wieder NUR dieses Format aus:\n"
+            "Zutaten:\n- ...\n\nZubereitung:\n1. ...\n\n"
+            + (health_rules_text + "\n\n" if health_rules_text else "")
+            + out
+        )
+        out = ask_ollama(fix_prompt)
+
+    return out
 
 
 # ---------------------------------------------------------
@@ -285,8 +421,6 @@ def debug_request(user_text: str) -> str:
 
 # ---------------------------------------------------------
 # Streamlit Session State
-# Speichert Chatverlauf & Eingabefeld
-# zwischen UI-Neurenderings
 # ---------------------------------------------------------
 def _ensure_state() -> None:
     if "wishboard_chat" not in st.session_state:
@@ -304,10 +438,9 @@ def _add_assistant_message(text: str):
 
 
 # ---------------------------------------------------------
-# Haupt-Logik: RAG + KI mit Ernährungsstilen
+# Haupt-Logik: RAG + KI mit Ernährungsstilen + Guardrails
 # ---------------------------------------------------------
 def _generate_assistant_reply(user_text: str, profile: dict) -> str:
-
     raw_text = user_text.strip()
     if not raw_text:
         return "Wie kann ich dir helfen?"
@@ -318,53 +451,52 @@ def _generate_assistant_reply(user_text: str, profile: dict) -> str:
     if lower_text.startswith("debug"):
         return debug_request(raw_text)
 
-    # Prüfen, ob es überhaupt um Essen / Rezepte geht
     recipe_requested = is_recipe_request(raw_text)
+    guard = build_health_guardrails(profile)
 
-    # ---------------------------------------------------------
-    # Nur bei Rezeptanfragen → RAG-Suche (URLs + PDFs)
-    # ---------------------------------------------------------
+    # Nur bei Rezeptanfragen → RAG-Suche
     results = []
     if recipe_requested:
         try:
-            from .wishboard_engine import search_index, format_search_results
+            from .wishboard_engine import search_index
             results = search_index(raw_text, top_k=3)
         except Exception:
             results = []
 
-    # ---------------------------------------------------------
-    # Wenn RAG etwas gefunden hat → Rezept nur formatieren
-    # ---------------------------------------------------------
+    # Wenn RAG etwas gefunden hat → nur nutzen, wenn thematisch + guardrail-sicher
     if recipe_requested and results:
         from .wishboard_engine import format_search_results
 
         recipe_raw = format_search_results(results).strip()
 
-        # Prüfen, ob das RAG-Rezept thematisch passend ist
-        if recipe_raw and is_relevant_to_query(recipe_raw, user_text):
+        # RAG: thematisch passend + kein Guardrail-Verstoß
+        if recipe_raw and is_relevant_to_query(recipe_raw, raw_text) and not violates_guardrails(recipe_raw, guard):
             prompt = (
                 "Formatiere dieses Rezept klar und übersichtlich. "
                 "Gib NUR 'Zutaten:' und 'Zubereitung:' aus.\n\n"
                 f"{recipe_raw}"
             )
             formatted = ask_ollama(prompt)
+
+            # Auch das formatierte Ergebnis nochmal prüfen
+            if guard["block_terms"] and violates_guardrails(formatted, guard):
+                # Wenn es weiterhin verstößt: lieber neu generieren
+                style = detect_recipe_style(raw_text)
+                generated = generate_styled_recipe(raw_text, style, profile)
+                return f"Ich habe ein passenderes Rezept für dein Profil erstellt:\n\n{generated}"
+
             return f"Hier ist ein Rezept aus meinen Quellen:\n\n{formatted}"
-        else:
-            # NICHT passendes Rezept → sofort zur KI
-            style = detect_recipe_style(user_text)
-            generated = generate_styled_recipe(user_text, style, profile)
 
-            return f"Hier ist ein gesundes {style}-Rezept für dich:\n\n{generated}"
+        # Falls unpassend (Thema oder Guardrails) → KI generiert sicher
+        style = detect_recipe_style(raw_text)
+        generated = generate_styled_recipe(raw_text, style, profile)
+        return f"Hier ist ein gesundes Rezept für dich:\n\n{generated}"
 
-    # ---------------------------------------------------------
-    # KEIN Treffer im Index ODER kein gültiges Rezept → KI erzeugt gesundes Rezept
-    #     mit automatisch erkanntem Ernährungsstil
-    # ---------------------------------------------------------
+    # Kein Treffer im Index → KI erzeugt Rezept
     if recipe_requested:
         style = detect_recipe_style(raw_text)
         generated = generate_styled_recipe(raw_text, style, profile)
 
-        # Kleiner Text für das Label
         style_labels = {
             "lowcarb": "Low-Carb",
             "highprotein": "High-Protein",
@@ -377,12 +509,9 @@ def _generate_assistant_reply(user_text: str, profile: dict) -> str:
             "healthy": "gesund",
         }
         label = style_labels.get(style, "gesund")
-
         return f"Hier ist ein gesundes {label}-Rezept für dich:\n\n{generated}"
 
-    # ---------------------------------------------------------
     # Keine Essensanfrage → normale KI-Antwort
-    # ---------------------------------------------------------
     normal_prompt = (
         "Du bist ein hilfreicher, freundlicher KI-Assistent. "
         "Antworte klar, knapp und auf Deutsch.\n\n"
@@ -404,7 +533,6 @@ def render_wishboard_chat() -> None:
         unsafe_allow_html=True,
     )
 
-    # Chat-Verlauf
     chat_container = st.container()
     with chat_container:
         for msg in st.session_state["wishboard_chat"]:
@@ -414,9 +542,7 @@ def render_wishboard_chat() -> None:
             else:
                 text = msg["text"]  # Markdown für KI-Antworten erlauben
 
-            bubble_class = (
-                "chat-bubble-user" if role == "user" else "chat-bubble-assistant"
-            )
+            bubble_class = "chat-bubble-user" if role == "user" else "chat-bubble-assistant"
             row_class = "chat-row chat-user" if role == "user" else "chat-row chat-assistant"
 
             st.markdown(
@@ -424,7 +550,6 @@ def render_wishboard_chat() -> None:
                 unsafe_allow_html=True
             )
 
-    # Eingabe & Senden
     cols = st.columns([8, 1])
     with cols[0]:
         st.text_input(
@@ -442,9 +567,13 @@ def _on_send_click():
         return
 
     _add_user_message(text)
-    profile = load_user_profile("Miray")  # später dynamisch
+
+    # später dynamisch (z.B. aus Session/User Login)
+    profile = load_user_profile("Miray")
+
     reply = _generate_assistant_reply(text, profile)
     _add_assistant_message(reply)
+
     st.session_state["wishboard_input"] = ""
 
 
