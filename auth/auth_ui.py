@@ -4,7 +4,7 @@ from storage.profile_manager import (
     load_state_for_user,
     ensure_session_defaults,
     load_users,
-    
+
 )
 from .auth_logic import signup_user, login_user
 from .auth_css import inject_auth_css
@@ -24,7 +24,7 @@ def show_auth_page():
 
     # ---------- LOGIN VIEW ---------- #
     if view == "login":
-        st.subheader("Login")
+        st.subheader("Welcome!")
 
         with st.form("login_form"):
             identifier = st.text_input("Username or Email")
@@ -42,7 +42,7 @@ def show_auth_page():
                 ensure_session_defaults()
                 load_state_for_user(username)
 
-                #  get email from users.json and keep it in session only 
+                #  get email from users.json and keep it in session only
                 users = load_users()
                 email = users.get(username, {}).get("email", "")
                 st.session_state["auth_email"] = email
@@ -53,10 +53,12 @@ def show_auth_page():
                 st.error(msg)
 
         st.markdown("---")
+
         st.write("Don't have an account?")
         if st.button("Create a new account"):
             st.session_state.auth_view = "signup"
             st.rerun()
+
 
     # ---------- SIGNUP VIEW ---------- #
     elif view == "signup":
