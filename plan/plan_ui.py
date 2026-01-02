@@ -176,7 +176,7 @@ def render_plan_tab(model_name: str):
     }
 
     label = st.select_slider(
-        "Workout-Intensität",
+        "Music-Intensity",
         options=list(INTENSITY_LABELS.keys()),
         value="Medium (Strength)",
     )
