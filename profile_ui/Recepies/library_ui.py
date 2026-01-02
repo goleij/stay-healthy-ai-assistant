@@ -9,7 +9,7 @@ def render_library_page():
     """Render the recipes and shopping lists library page."""
     # Inject custom CSS for this page
     inject_library_css()
-    st.header("📚 Recipes & shopping lists")
+    st.header("Recipes & shopping lists")
 
     recipes = st.session_state.get("saved_recipes", [])
     weekly_list = st.session_state.get("weekly_shopping_list")
@@ -48,6 +48,6 @@ def render_library_page():
                 st.markdown(last_list)
 
     st.write("---")
-    if st.button("⬅ Back to profile"):
+    if st.button("Back to profile"):
         st.session_state.page = "profile"
         st.rerun()
