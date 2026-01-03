@@ -133,3 +133,9 @@ websockets==15.0.1
 yarl==1.22.0
 zipp==3.23.0
 zstandard==0.23.0
+streamlit-webrtc==0.47.9
+webrtcvad==2.0.10
+numpy>=1.26
+av==12.3.0
+faster-whisper==1.0.3
+soundfile==0.13.1

@@ -154,19 +154,22 @@ div[data-testid="stMarkdownContainer"] p{
 /* =========================================================
    🔴 BUTTON STYLE (LOGIN + CREATE ACCOUNT)
 ========================================================= */
-.stButton > button,
-.stFormSubmitButton button,
-div[data-testid="stFormSubmitButton"] button,
-.stForm button[type="submit"],
-.stForm button[kind="primary"],
-.stForm button[kind="secondary"]{
-  width: min(420px, 170%) !important;
-  display: inline-flex !important;
-  align-items: center !important;
+div[data-testid="stElementContainer"]{
+  width: 100% !important;
+}
+
+div[data-testid="stFormSubmitButton"],
+div[data-testid="stButton"]{
+  width: 100% !important;
+  display: flex !important;
   justify-content: center !important;
-  margin-top: 0.75rem !important;
-  margin-right: 0rem; !important;
-  margin-left: 0rem; !important;
+}
+
+div[data-testid="stFormSubmitButton"] > button,
+div[data-testid="stButton"] > button{
+  width: 100% !important;
+  max-width: 420px !important;
+  margin: 0.75rem 0 0 0 !important;
 
   min-height: 44px !important;
   padding: 0.6rem 1.25rem !important;
@@ -175,10 +178,9 @@ div[data-testid="stFormSubmitButton"] button,
   align-items: center !important;
   justify-content: center !important;
 
-  font-size: var(--fs-button) !important;
   font-weight: 700 !important;
-  
   border-radius: 999px !important;
+
   background-color: var(--primary) !important;
   color: #ffffff !important;
   border: none !important;
@@ -222,6 +224,25 @@ div[data-testid="stFormSubmitButton"] button:focus,
 hr{ margin: 1.25rem 0; }
 
 
+div[data-testid="stForm"]{
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+}
+
+div[data-testid="stForm"] div[data-testid="stFormSubmitButton"]{
+  width: 100% !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+
+div[data-testid="stFormSubmitButton"] > button{
+  width: auto !important;
+  max-width: none !important;
+  min-width: 140px !important;
+  padding: 0.4rem 1.2rem !important;
+  min-height: 36px !important;
+}
 
 
 </style>
@@ -248,5 +269,6 @@ def inject_auth_css():
         <path d="M1.681,786.1s137.4-128.75,294.973-84.552,220.989-280.56,220.989-280.56v605.319H-8.888Z" transform="translate(-20.721 -630.787)" fill="#009245" opacity="0.16"/>
         <path d="M1.681,786.1s137.4-128.75,294.973-84.552,220.989-280.56,220.989-280.56v605.319H-8.888Z" transform="translate(-24.289 -602.249)" fill="#009245"/>
     </g>
+  </svg>
 </div>
 ''', unsafe_allow_html=True)

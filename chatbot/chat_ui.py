@@ -1,3 +1,9 @@
+import os
+import time
+import hashlib
+import io
+import wave
+import requests
 import streamlit as st
 from ollama._types import ResponseError
 
@@ -5,52 +11,94 @@ from storage.profile_manager import save_state_for_current_user
 from llm_utils import get_llm, get_qa
 from .chat_css import inject_chat_css
 
+from components.silence_recorder.silence_recorder import (
+    silence_recorder,
+    decode_component_audio,
+)
+from stt_whisper import transcribe_webm_bytes
 
-# ---------- helpers for multi-chat sessions ----------
 
-# add multi-chat support in session_state
+# ---------------------------
+# TTS helpers
+# ---------------------------
+def sniff_audio_format(b: bytes) -> str:
+    if not b:
+        return "audio/wav"
+    if b[:4] == b"RIFF" and len(b) >= 12 and b[8:12] == b"WAVE":
+        return "audio/wav"
+    if b[:3] == b"ID3" or b[:2] == b"\xff\xfb":
+        return "audio/mp3"
+    if b[:4] == b"OggS":
+        return "audio/ogg"
+    return "audio/wav"
+
+
+def wav_duration_seconds(b: bytes) -> float:
+    try:
+        with wave.open(io.BytesIO(b), "rb") as w:
+            frames = w.getnframes()
+            rate = w.getframerate()
+            return (frames / float(rate)) if rate else 0.0
+    except Exception:
+        return 0.0
+
+
+def shorten_for_tts(text: str, max_chars: int = 220) -> str:
+    t = (text or "").strip()
+    if len(t) <= max_chars:
+        return t
+    cut = t[:max_chars]
+    last_punct = max(cut.rfind("."), cut.rfind("!"), cut.rfind("?"))
+    if last_punct >= 40:
+        cut = cut[: last_punct + 1]
+    return cut.strip()
+
+
+def tts_speak(text: str) -> tuple[bytes, str, float]:
+    speak_url = os.getenv("CHAT_TTS_URL", "http://tts_server:5005/speak")
+    t0 = time.time()
+    r = requests.post(speak_url, json={"text": text}, timeout=180)
+    dt = time.time() - t0
+    r.raise_for_status()
+    content_type = (r.headers.get("content-type") or "").strip()
+    return r.content, content_type, dt
+
+
+def collect_stream_to_text(token_iter) -> str:
+    out = ""
+    for token in token_iter:
+        if token is None:
+            continue
+        out += str(token)
+    return out.strip()
+
+
+# ---------- multi-chat helpers ----------
 def _ensure_chat_sessions() -> None:
-    """Ensure we have a multi-chat structure in session_state.
-
-    chat_sessions: {
-        chat_id: {"title": str, "history": list[(speaker, message)]}
-    }
-    current_chat_id: active chat.
-    """
     sessions = st.session_state.get("chat_sessions")
 
     if not sessions:
         sessions = {}
         old_history = st.session_state.get("chat_history", [])
         first_id = "chat_1"
-        sessions[first_id] = {
-            "title": "Chat 1",
-            "history": list(old_history),
-        }
+        sessions[first_id] = {"title": "Chat 1", "history": list(old_history)}
         st.session_state["chat_sessions"] = sessions
         st.session_state["current_chat_id"] = first_id
 
-    # Ensure current_chat_id is valid
     current_id = st.session_state.get("current_chat_id")
     if current_id not in sessions:
         current_id = next(iter(sessions))
         st.session_state["current_chat_id"] = current_id
 
-    # Alias chat_history to the current session's history (for existing code)
-    st.session_state.chat_history = st.session_state["chat_sessions"][current_id][
-        "history"
-    ]
+    st.session_state.chat_history = st.session_state["chat_sessions"][current_id]["history"]
 
-# accessing or updating the active chat's data in a multi-chat interface
+
 def _get_current_session():
     sessions = st.session_state["chat_sessions"]
     current_id = st.session_state["current_chat_id"]
     return current_id, sessions[current_id]
 
-
-# ---------- helpers using chat_history alias ----------
-
-
+# chat history to text
 def _build_history_text(max_turns: int = 6) -> str:
     history = st.session_state.get("chat_history", [])
     if not history:
@@ -64,7 +112,6 @@ def _build_history_text(max_turns: int = 6) -> str:
 
 
 def _build_health_context(profile: dict) -> str:
-    """Build safety rules from profile: diseases, allergies, limitations."""
     health_issues = (profile.get("health_issues") or "").strip()
     allergies = (profile.get("allergies") or "").strip()
     text = (health_issues + " " + allergies).lower()
@@ -72,75 +119,37 @@ def _build_health_context(profile: dict) -> str:
     rules = []
 
     if health_issues:
-        rules.append(
-            f"The user has these health conditions or limitations: {health_issues}."
-        )
+        rules.append(f"The user has these health conditions or limitations: {health_issues}.")
 
     if "diabetes" in text:
         rules.append(
             "Treat the user as having diabetes for all meal and recipe suggestions: "
-            "avoid added sugar, sugary drinks, sweets and white flour. "
-            "Prefer high-fiber carbohydrates and balanced meals. "
-            "If you suggest cookies, cake or desserts, they must be clearly sugar-free "
-            "and you must say so. Do not recommend syrups or fruit juice as 'healthy' sweeteners."
+            "avoid added sugar, sugary drinks, sweets and white flour. Prefer high-fiber carbs and balanced meals."
         )
 
     if "high blood pressure" in text or "hypertension" in text:
         rules.append(
-            "For high blood pressure: keep meals low in salt, avoid very salty processed foods "
-            "(chips, instant noodles, cured meats, ready-made sauces) and prefer heart-friendly "
-            "foods like vegetables, fruits, whole grains, unsalted nuts, olive oil and fish."
+            "For high blood pressure: keep meals low in salt and avoid salty processed foods."
         )
 
     if "heart disease" in text or "heart condition" in text:
         rules.append(
-            "The user has a heart condition: only suggest moderate-intensity exercise. "
-            "No HIIT, no sprints, no maximal effort intervals. "
-            "Prefer steady, comfortable activities such as walking or gentle cycling. "
-            "Always mention that they should follow their doctor's advice."
+            "The user has a heart condition: suggest only moderate-intensity exercise; no HIIT/sprints."
         )
 
     if "joint" in text or "knee" in text:
         rules.append(
-            "The user has joint problems: avoid high-impact exercises like running, jumping "
-            "and deep heavy squats. Prefer low-impact options such as walking on flat ground, "
-            "cycling, swimming, chair squats, wall push-ups, light band exercises and gentle mobility work."
+            "The user has joint problems: avoid high-impact exercises (running/jumping) and prefer low-impact."
         )
 
     if "asthma" in text or "lung" in text:
         rules.append(
-            "The user has asthma or lung issues: avoid very intense, breathless intervals and sprints. "
-            "Recommend gradual warm-ups and give enough rest between efforts."
-        )
-
-    # Physical limitations / handicap
-    if "broken arm" in text:
-        rules.append(
-            "The user has a broken arm or strong limitation in one arm: "
-            "avoid exercises that load that arm (push-ups, heavy pressing, pull-ups). "
-            "Prefer lower-body and core exercises and safe cardio."
-        )
-
-    if "broken leg" in text:
-        rules.append(
-            "The user has a broken leg or strong limitation in one leg: "
-            "avoid standing and impact exercises on that leg. "
-            "Prefer seated upper-body work, core work and safe, doctor-approved rehab."
-        )
-
-    if "wheelchair" in text or "severe mobility limitation" in text:
-        rules.append(
-            "The user uses a wheelchair or has severe mobility limitation: "
-            "focus on seated or lying exercises, upper-body strength, core stability, "
-            "and gentle range-of-motion work. Do not suggest walking, running, jumping or standing balance drills."
+            "The user has asthma or lung issues: avoid very intense intervals; recommend warm-ups and rests."
         )
 
     if allergies:
         rules.append(
-            f"The user is allergic or intolerant to: {allergies}. "
-            "Never include these ingredients or very similar products in any recipe or suggestion. "
-            "Do not include peanuts if they are allergic to peanuts; do not include tree nuts if they are allergic "
-            "to tree nuts, and so on. Always propose safe alternative ingredients."
+            f"The user is allergic or intolerant to: {allergies}. Never include these ingredients; use safe alternatives."
         )
 
     if not rules:
@@ -164,59 +173,37 @@ def _get_last_user_message() -> str | None:
             return msg
     return None
 
-# show recipe tools (save, shopping list) based on last messages
+
 def _should_show_recipe_tools(last_user: str | None, last_coach: str | None) -> bool:
     if not last_coach:
         return False
-    
+
     combined = ((last_user or "") + "\n" + last_coach).lower()
-
     keywords = [
-        "recipe",
-        "recipie",
-        "recepie",
-        "meal",
-        "breakfast",
-        "lunch",
-        "dinner",
-        "snack",
-        "dessert",
-        "shopping list",
-        "ingredients",
-        "meal plan",
-        "dish",
-        "cook",
-        "cookie",
-        "biscuit",
+        "recipe", "recipie", "recepie", "meal", "breakfast", "lunch", "dinner",
+        "snack", "dessert", "shopping list", "ingredients", "meal plan", "dish",
+        "cook", "cookie", "biscuit"
     ]
-
     if any(kw in combined for kw in keywords):
         return True
 
     lines = [ln.strip() for ln in last_coach.splitlines() if ln.strip()]
     bullet_like = [
-        ln
-        for ln in lines
+        ln for ln in lines
         if ln[0:1] in ("-", "*", "•") or (len(ln) > 2 and ln[:2].isdigit())
     ]
-
-    if len(bullet_like) >= 3:
-        return True
-
-    return False
+    return len(bullet_like) >= 3
 
 
 def _extract_recipe_title(text: str) -> str:
     if not text:
         return "Recipe shopping list"
-
     first_line = ""
     for line in text.splitlines():
-        stripped = line.strip()
-        if stripped:
-            first_line = stripped
+        s = line.strip()
+        if s:
+            first_line = s
             break
-
     if not first_line:
         return "Recipe shopping list"
 
@@ -237,28 +224,58 @@ def _extract_recipe_title(text: str) -> str:
 
 
 # ---------- main UI ----------
-
-
 def render_chat_tab(model_name: str):
     inject_chat_css()
+    st.markdown(
+        """
+        <style>
+            #cfg { display: none !important; }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
     _ensure_chat_sessions()
 
     sessions = st.session_state["chat_sessions"]
     current_id, current_session = _get_current_session()
 
+    # ---------------------------
+    # Voice state (per chat)
+    # ---------------------------
+    if "voice_mode" not in st.session_state:
+        st.session_state.voice_mode = False
+
+    if "restart_nonce_by_chat" not in st.session_state:
+        st.session_state.restart_nonce_by_chat = {}
+    st.session_state.restart_nonce_by_chat.setdefault(current_id, 0)
+
+    if "last_audio_hash_by_chat" not in st.session_state:
+        st.session_state.last_audio_hash_by_chat = {}
+    st.session_state.last_audio_hash_by_chat.setdefault(current_id, "")
+
+    if "coach_audio_by_chat" not in st.session_state:
+        st.session_state.coach_audio_by_chat = {}
+    st.session_state.coach_audio_by_chat.setdefault(current_id, {})
+
+    if "mic_paused_by_chat" not in st.session_state:
+        st.session_state.mic_paused_by_chat = {}
+    st.session_state.mic_paused_by_chat.setdefault(current_id, False)
+
+    if "resume_after_ms_by_chat" not in st.session_state:
+        st.session_state.resume_after_ms_by_chat = {}
+    st.session_state.resume_after_ms_by_chat.setdefault(current_id, 0)
+
+    coach_audio_map = st.session_state.coach_audio_by_chat[current_id]
+
     col_left, col_right = st.columns([1.1, 3])
 
-    # ----- left column: chat list -----
+    # ----- left column -----
     with col_left:
         st.markdown('<div class="chat-sidebar-card">', unsafe_allow_html=True)
+        st.markdown('<div class="chat-sidebar-title">Your chats</div>', unsafe_allow_html=True)
         st.markdown(
-            '<div class="chat-sidebar-title">Your chats</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            '<div class="chat-sidebar-subtitle">'
-            "Switch between conversations or start a new one."
-            "</div>",
+            '<div class="chat-sidebar-subtitle">Switch between conversations or start a new one.</div>',
             unsafe_allow_html=True,
         )
 
@@ -268,6 +285,13 @@ def render_chat_tab(model_name: str):
             sessions[new_id] = {"title": f"Chat {new_index}", "history": []}
             st.session_state["current_chat_id"] = new_id
             st.session_state.chat_history = sessions[new_id]["history"]
+
+            st.session_state.restart_nonce_by_chat[new_id] = 0
+            st.session_state.last_audio_hash_by_chat[new_id] = ""
+            st.session_state.coach_audio_by_chat[new_id] = {}
+            st.session_state.mic_paused_by_chat[new_id] = False
+            st.session_state.resume_after_ms_by_chat[new_id] = 0
+
             save_state_for_current_user()
             st.rerun()
 
@@ -278,15 +302,14 @@ def render_chat_tab(model_name: str):
                 title = title[:29] + "..."
             is_selected = chat_id == current_id
             prefix = "▶  " if is_selected else "💬  "
-            button_label = f"{prefix}{title}"
-            if st.button(button_label, key=f"select_{chat_id}"):
+            if st.button(f"{prefix}{title}", key=f"select_{chat_id}"):
                 st.session_state["current_chat_id"] = chat_id
                 st.session_state.chat_history = sessions[chat_id]["history"]
                 save_state_for_current_user()
                 st.rerun()
         st.markdown("</div></div>", unsafe_allow_html=True)
 
-    # ----- right column: active chat -----
+    # ----- right column -----
     with col_right:
         st.markdown('<div class="chat-main-card">', unsafe_allow_html=True)
 
@@ -295,25 +318,47 @@ def render_chat_tab(model_name: str):
             unsafe_allow_html=True,
         )
         st.markdown(
-            '<div class="chat-main-description">'
-            "Ask me anything about your plan, workouts, or health-friendly recipes!"
-            "</div>",
+            '<div class="chat-main-description">Ask me anything about your plan, workouts, or health-friendly recipes!</div>',
             unsafe_allow_html=True,
         )
 
+        # Voice controls
+        top = st.columns([1])
+        with top[0]:
+            st.session_state.voice_mode = st.toggle("Voice mode", value=st.session_state.voice_mode)
+
+        tts_max_chars = 220  
+
+
         if st.button(" Clear this chat"):
             st.session_state.chat_history.clear()
+            st.session_state.coach_audio_by_chat[current_id] = {}
+            st.session_state.last_audio_hash_by_chat[current_id] = ""
+            st.session_state.mic_paused_by_chat[current_id] = False
+            st.session_state.resume_after_ms_by_chat[current_id] = 0
+            st.session_state.restart_nonce_by_chat[current_id] += 1
             save_state_for_current_user()
-            st.success("Current chat has been reset.")
             st.rerun()
 
-        if st.session_state.chat_history:
-            for speaker, message in st.session_state.chat_history:
-                if speaker == "user":
-                    st.markdown(f"**🧍 You:** {message}")
-                else:
-                    st.markdown(f"**🏋️ Coach:** {message}")
+        # Render chat history (audio first + autoplay ONLY for last assistant message)
+        for idx, (speaker, message) in enumerate(st.session_state.chat_history):
+            if speaker == "user":
+                with st.chat_message("user"):
+                    st.write(message)
+            else:
+                with st.chat_message("assistant"):
+                    audio_item = coach_audio_map.get(idx)
 
+                    is_last_message = (idx == len(st.session_state.chat_history) - 1)
+
+                    if audio_item and audio_item[0]:
+                        audio_bytes, fmt, _meta = audio_item
+                        st.audio(audio_bytes, format=fmt, autoplay=is_last_message)
+
+                    st.write(message)
+
+
+        # Tools for last coach message (text-mode feature)
         last_coach = _get_last_coach_message()
         last_user = _get_last_user_message()
         if last_coach and _should_show_recipe_tools(last_user, last_coach):
@@ -336,10 +381,10 @@ def render_chat_tab(model_name: str):
                             "Answer in English.\n\n"
                             "You are a nutrition assistant. Based on the following recipe or meal plan, "
                             "extract a clean shopping list. Group ingredients by category if reasonable "
-                            "(for example: Vegetables, Fruits, Proteins, Dairy, Grains, Other). "
-                            "Use bullet points and include approximate amounts if they are present.\n\n"
+                            "(Vegetables, Fruits, Proteins, Dairy, Grains, Other). "
+                            "Use bullet points and include amounts if present.\n\n"
                             f"TEXT:\n{last_coach}\n\n"
-                            "Now output ONLY the shopping list in markdown."
+                            "Output ONLY the shopping list in markdown."
                         )
                         with st.spinner("🛒 Generating shopping list..."):
                             shopping_text = st.write_stream(llm.stream(prompt))
@@ -347,13 +392,10 @@ def render_chat_tab(model_name: str):
                         recipe_title = _extract_recipe_title(last_coach)
                         st.session_state["last_recipe_shopping_title"] = recipe_title
                         st.session_state["last_shopping_list"] = shopping_text
-
                         save_state_for_current_user()
                         st.success("Shopping list saved.")
                     except ResponseError:
-                        st.error(
-                            f"❌ Model '{model_name}' not found. Run: `ollama pull {model_name}` or pick another."
-                        )
+                        st.error(f"❌ Model '{model_name}' not found. Run: `ollama pull {model_name}`.")
                     except Exception as e:
                         st.error(f"Unexpected error while creating shopping list: {e}")
 
@@ -363,6 +405,155 @@ def render_chat_tab(model_name: str):
             help="Turn on to answer using your prepared data.",
         )
 
+        # ---------------------------
+        # Voice recorder (inline)
+        # ---------------------------
+        voice_result = None
+        if st.session_state.voice_mode:
+            voice_result = silence_recorder(
+                silence_to_end_ms=900,
+                min_speech_ms=120,
+                threshold_db=-45,
+                auto_start=False,
+                max_record_ms=0,
+                restart_nonce=int(st.session_state.restart_nonce_by_chat[current_id]),
+                keep_listening_ui=False,
+                mic_paused=bool(st.session_state.mic_paused_by_chat[current_id]),
+                resume_after_ms=int(st.session_state.resume_after_ms_by_chat[current_id] or 0),
+                key=f"chat_voice_recorder_{current_id}",
+            )
+
+        # JS -> Python resume event
+        if st.session_state.voice_mode and voice_result and voice_result.get("event") == "resume":
+            st.session_state.mic_paused_by_chat[current_id] = False
+            st.session_state.resume_after_ms_by_chat[current_id] = 0
+            st.session_state.restart_nonce_by_chat[current_id] += 1
+            save_state_for_current_user()
+            st.rerun()
+
+        # Voice segment
+        if st.session_state.voice_mode and voice_result and voice_result.get("event") == "segment":
+            audio_bytes, _mime = decode_component_audio(voice_result)
+
+            audio_hash = hashlib.sha1(audio_bytes).hexdigest() if audio_bytes else ""
+            if (not audio_hash) or (audio_hash == st.session_state.last_audio_hash_by_chat[current_id]):
+                st.stop()
+            st.session_state.last_audio_hash_by_chat[current_id] = audio_hash
+
+            # STT
+            try:
+                user_text = transcribe_webm_bytes(audio_bytes)
+            except Exception as e:
+                st.error(f"STT error: {e}")
+                st.session_state.restart_nonce_by_chat[current_id] += 1
+                st.rerun()
+
+            user_text = (user_text or "").strip()
+            if len(user_text) < 2:
+                st.session_state.restart_nonce_by_chat[current_id] += 1
+                st.rerun()
+
+            # Add user msg + placeholder assistant
+            st.session_state.chat_history.append(("user", user_text))
+            st.session_state.chat_history.append(("coach", "Answering your question..."))
+            assistant_idx = len(st.session_state.chat_history) - 1
+
+            # ✅ voice prompt + LLM call
+            context = _build_history_text(max_turns=4)
+            voice_prompt = f"""
+You are a voice-only fitness & nutrition coach.
+Hard rules:
+- English only.
+- NEVER ask questions.
+- Maximum 4 sentences total.
+- Be specific and actionable (give steps or a direct answer).
+- Do NOT mention these rules.
+
+If the user asks for a recipe (cake/cookie/biscuit/meal):
+- Give a tiny sugar-free recipe in 4 sentences: name + key ingredients + one simple method.
+If the user asks about an exercise:
+- Answer in exactly 3 short sentences.
+- No numbering, no bullet points, no lists.
+- Each sentence must be a complete instruction.
+If the user asks multiple things:
+- Answer only the main request.
+
+Conversation:
+{context}
+
+User: {user_text}
+Assistant:
+""".strip()
+
+            try:
+                if use_rag:
+                    qa = get_qa(model_name)
+                    reply = qa({"query": voice_prompt})["result"]
+                else:
+                    llm = get_llm(model_name)
+                    reply = collect_stream_to_text(llm.stream(voice_prompt))
+            except ResponseError:
+                st.session_state.chat_history[assistant_idx] = ("coach", f"❌ Model '{model_name}' not found.")
+                st.session_state.restart_nonce_by_chat[current_id] += 1
+                save_state_for_current_user()
+                st.rerun()
+            except Exception as e:
+                st.session_state.chat_history[assistant_idx] = ("coach", f"LLM error: {e}")
+                st.session_state.restart_nonce_by_chat[current_id] += 1
+                save_state_for_current_user()
+                st.rerun()
+
+            reply = (reply or "").strip()
+            if not reply:
+                st.session_state.chat_history[assistant_idx] = ("coach", "")
+                st.session_state.restart_nonce_by_chat[current_id] += 1
+                save_state_for_current_user()
+                st.rerun()
+
+            reply_for_display = shorten_for_tts(reply, max_chars=max(120, int(tts_max_chars)))
+            tts_text = shorten_for_tts(reply_for_display, max_chars=int(tts_max_chars))
+
+            try:
+                audio_bytes2, content_type2, dt2 = tts_speak(tts_text)
+            except Exception:
+                audio_bytes2 = b""
+                content_type2 = ""
+                dt2 = 0.0
+
+            st.session_state.chat_history[assistant_idx] = ("coach", reply_for_display)
+
+            if audio_bytes2:
+                fmt2 = sniff_audio_format(audio_bytes2)
+                dur = wav_duration_seconds(audio_bytes2)
+                meta = f"{content_type2} (took {dt2:.1f}s) | tts_chars={len(tts_text)}"
+                coach_audio_map[assistant_idx] = (audio_bytes2, fmt2, meta)
+
+                # ✅ mute mic while TTS plays, then JS will auto-send resume event
+                st.session_state.mic_paused_by_chat[current_id] = False
+                st.session_state.resume_after_ms_by_chat[current_id] = 0
+
+            else:
+                coach_audio_map[assistant_idx] = (b"", "audio/wav", "TTS error (no audio).")
+
+                 # ✅ Immediately restart recorder
+                st.session_state.mic_paused_by_chat[current_id] = False
+                st.session_state.resume_after_ms_by_chat[current_id] = 0
+                # fallback: restart recorder anyway
+                st.session_state.restart_nonce_by_chat[current_id] += 1
+
+            # Rename chat title
+            if not current_session.get("title") or current_session["title"].startswith("Chat "):
+                snippet = user_text.strip().split("\n", 1)[0]
+                if len(snippet) > 32:
+                    snippet = snippet[:29] + "..."
+                current_session["title"] = snippet
+
+            save_state_for_current_user()
+            st.rerun()
+
+        # ---------------------------
+        # Text mode (unchanged)
+        # ---------------------------
         user_input = st.text_input("Type your question here 👇")
 
         if st.button("Send "):
@@ -376,18 +567,8 @@ def render_chat_tab(model_name: str):
 
             lower_input = text.lower()
             recipe_keywords = [
-                "recipe",
-                "recipie",
-                "recepie",
-                "meal",
-                "breakfast",
-                "lunch",
-                "dinner",
-                "snack",
-                "dessert",
-                "cookies",
-                "cookie",
-                "biscuit",
+                "recipe", "recipie", "recepie", "meal", "breakfast", "lunch", "dinner",
+                "snack", "dessert", "cookies", "cookie", "biscuit",
             ]
             wants_recipe = any(kw in lower_input for kw in recipe_keywords)
 
@@ -407,101 +588,39 @@ def render_chat_tab(model_name: str):
                 "You are an expert fitness and nutrition coach. "
                 "Use the profile information and health context to give safe, personalized advice. "
                 "When the user asks for meals or recipes, always adapt them to their diet preference, "
-                "health conditions, allergies and physical limitations. "
-                "For exercise questions, always respect joint, heart, lung and mobility limitations. "
+                "health conditions and allergies. "
                 "Be concise and precise. This is general information, not medical advice. "
             )
 
             if wants_recipe:
                 system_instructions += (
                     "The next user message is a DIRECT request for a recipe. "
-                    "You MUST immediately provide exactly ONE concrete recipe adapted to their "
-                    "health context and diet preference. "
+                    "You MUST immediately provide exactly ONE concrete recipe adapted to their health context. "
                     "Your answer MUST be structured as:\n"
                     "- A level-3 markdown heading with the recipe name.\n"
                     "- A bullet list of ingredients with exact amounts.\n"
                     "- A numbered list of clear, step-by-step instructions.\n"
-                    "Do NOT ask the user any questions. "
-                    "Do NOT suggest alternatives instead of giving the recipe. "
-                    "Do NOT start with motivational text or long explanations before the recipe. "
-                    "You may add ONE short tip sentence at the very end if helpful.\n"
-                    "Make sure the recipe name, the ingredients list and the instructions are strictly consistent. "
-                    "If the recipe name or user request mentions a key ingredient (for example: apple, banana, "
-                    "chicken, chocolate, etc.), that ingredient must appear as a real ingredient in the list and be "
-                    "used in the instructions, unless it conflicts with allergies or health rules. "
-                    "If you must omit a requested ingredient for safety reasons, clearly explain that it is omitted "
-                    "and choose a different recipe name that does not mention it. "
-                    "Never mention an ingredient in the title that is not present in the ingredients list.\n"
-                )
-            else:
-                system_instructions += (
-                    "If the question is very unclear or self-contradictory and not obviously about a recipe, "
-                    "you may ask 1–2 short clarifying questions instead of guessing. "
+                    "Do NOT ask the user any questions.\n"
                 )
 
             system_instructions += language_instruction + "\n"
 
             full_prompt = system_instructions + "\n" + profile_context + health_context
-
             if history_text:
                 full_prompt += f"\nConversation so far:\n{history_text}\n"
-
-            if wants_recipe:
-                full_prompt += (
-                    "\nThe user request below is a direct request for a RECIPE. "
-                    "Respond exactly with one recipe in the format described above.\n"
-                )
-
             full_prompt += f"\nUser: {text}\nCoach:"
 
             try:
                 if use_rag:
                     qa = get_qa(model_name)
-                    with st.spinner(" Coach is thinking with knowledge base..."):
+                    with st.spinner("🏋️ Coach is thinking with knowledge base..."):
                         answer = qa({"query": full_prompt})["result"]
                 else:
                     llm = get_llm(model_name)
                     with st.spinner("🏃 Streaming..."):
                         answer = st.write_stream(llm.stream(full_prompt))
-
-                    if wants_recipe:
-                        requested_keywords = []
-                        for kw in [
-                            "apple",
-                            "banana",
-                            "chicken",
-                            "beef",
-                            "fish",
-                            "salmon",
-                            "chocolate",
-                        ]:
-                            if kw in lower_input:
-                                requested_keywords.append(kw)
-
-                        for kw in requested_keywords:
-                            if kw not in str(answer).lower():
-                                fix_prompt = (
-                                    f"{language_instruction}\n\n"
-                                    "You previously generated the following recipe:\n\n"
-                                    f"{answer}\n\n"
-                                    f"The original user request explicitly mentioned '{kw}', but this ingredient "
-                                    "does not appear in the ingredients list. "
-                                    "Rewrite the recipe so that this ingredient is included as a real ingredient and "
-                                    "used in the instructions, unless it is unsafe because of the health context "
-                                    "(allergies or medical rules). "
-                                    "If you must omit it for safety, clearly say so and choose a different recipe name "
-                                    "that does not mention it. "
-                                    "Output only the corrected recipe in markdown, using the same structure "
-                                    "as before (heading, ingredients list, numbered steps)."
-                                )
-                                with st.spinner("🔁 Fixing recipe for consistency..."):
-                                    answer = st.write_stream(llm.stream(fix_prompt))
-                                break
-
             except ResponseError:
-                st.error(
-                    f"❌ Model '{model_name}' not found. Run: `ollama pull {model_name}` or pick another."
-                )
+                st.error(f"❌ Model '{model_name}' not found. Run: `ollama pull {model_name}`.")
                 st.markdown("</div>", unsafe_allow_html=True)
                 return
             except Exception as e:
@@ -512,11 +631,7 @@ def render_chat_tab(model_name: str):
             st.session_state.chat_history.append(("user", text))
             st.session_state.chat_history.append(("coach", answer))
 
-            # Rename chat based on first message if still generic
-            if not current_session.get("title") or current_session["title"].startswith(
-                "Chat "
-            ):
-                
+            if not current_session.get("title") or current_session["title"].startswith("Chat "):
                 snippet = text.strip().split("\n", 1)[0]
                 if len(snippet) > 32:
                     snippet = snippet[:29] + "..."

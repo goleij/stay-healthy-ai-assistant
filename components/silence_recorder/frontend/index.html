@@ -1,0 +1,482 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 0; }
+      .wrap { padding: 10px; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      button {
+        padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px;
+        background: white; cursor: pointer; font-weight: 600;
+      }
+      button.primary { background: #ef4444; color: white; border-color: #ef4444; }
+      button:disabled { opacity: 0.6; cursor: not-allowed; }
+      .status { margin-top: 8px; font-size: 13px; color: #333; }
+      .meter { margin-top: 8px; height: 8px; background: #eee; border-radius: 999px; overflow: hidden; }
+      .bar { height: 100%; width: 0%; background: #ef4444; transition: width 80ms linear; }
+      .small { font-size: 12px; color: #666; }
+      .err { margin-top: 8px; font-size: 12px; color: #b91c1c; white-space: pre-wrap; }
+      .pill { display:inline-block; padding:2px 8px; border:1px solid #ddd; border-radius:999px; font-size:12px; }
+      /* Hide debug UI */
+      #cfg, #debug {
+          display: none !important;
+        }
+
+    </style>
+  </head>
+
+  <body>
+    <div class="wrap">
+      <div class="row">
+        <button id="start" class="primary">Start</button>
+        <button id="stop" disabled>Stop</button>
+        <span class="small" id="cfg"></span>
+      </div>
+
+      <div class="status" id="status">Loaded ✅ (waiting for Streamlit render)</div>
+      <div class="meter"><div class="bar" id="bar"></div></div>
+      <div class="small" id="debug"></div>
+      <div class="err" id="err"></div>
+    </div>
+
+    <script src="./streamlit.js"></script>
+
+    <script>
+      const Streamlit = window.Streamlit;
+
+      const elStart  = document.getElementById("start");
+      const elStop   = document.getElementById("stop");
+      const elStatus = document.getElementById("status");
+      const elCfg    = document.getElementById("cfg");
+      const elBar    = document.getElementById("bar");
+      const elDebug  = document.getElementById("debug");
+      const elErr    = document.getElementById("err");
+
+      // ----------------------------
+      // Args from Python
+      // ----------------------------
+      let args = {
+        autoStart: false,
+        maxRecordMs: 10000,
+        restartNonce: 0,
+        keepListeningUi: true,
+        micPaused: false,
+        resumeAfterMs: 0,
+      };
+
+      let lastRestartNonce = 0;
+
+      // ----------------------------
+      // Audio + Recorder state
+      // ----------------------------
+      let audioCtx = null;
+      let analyser = null;
+      let mediaStream = null;
+      let mediaRecorder = null;
+
+      let segmentChunks = [];
+      let segmentId = 0;
+
+      let pendingSend = false;
+      let stoppingForSend = false;
+
+      let meterRaf = null;
+
+      let recState = "idle"; // "idle" | "recording" | "paused"
+
+      // Resume scheduling
+      let resumeTimer = null;
+      let lastResumeKey = "";
+      let fallbackResumeArmed = false;
+
+      // ✅ Prevent auto-restart while Python is processing STT/LLM/TTS
+      let waitingForPython = false;
+
+      function setErr(text) {
+        elErr.textContent = text || "";
+        Streamlit.setFrameHeight();
+      }
+
+      function setStatus(text) {
+        elStatus.textContent = text;
+        Streamlit.setFrameHeight();
+      }
+
+      function updateCfgLabel() {
+        const sec = Math.round((args.maxRecordMs || 0) / 1000);
+        const micLabel = args.micPaused ? "micMuted" : "micOn";
+        const waitLabel = waitingForPython ? "waitingPython" : "ready";
+        elCfg.innerHTML =
+          `<span class="pill">mode=timed</span> ` +
+          `<span class="pill">maxRecord=${sec}s</span> ` +
+          `<span class="pill">state=${recState}</span> ` +
+          `<span class="pill">${micLabel}</span> ` +
+          `<span class="pill">${waitLabel}</span>`;
+      }
+
+      function mimeSupported(prefer) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported(prefer)) return prefer;
+        return "";
+      }
+
+      function setUiRecording() {
+        elStart.disabled = true;
+        elStop.disabled = false;
+      }
+
+      function setUiIdle() {
+        elStart.disabled = false;
+        elStop.disabled = true;
+      }
+
+      function cleanupTimersOnly() {
+        if (meterRaf) { cancelAnimationFrame(meterRaf); meterRaf = null; }
+      }
+
+      function clearResumeTimers() {
+        if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
+        lastResumeKey = "";
+        fallbackResumeArmed = false;
+      }
+
+      function cleanupAll() {
+        cleanupTimersOnly();
+        clearResumeTimers();
+
+        try { if (audioCtx) audioCtx.close(); } catch {}
+        audioCtx = null;
+        analyser = null;
+
+        if (mediaStream) {
+          for (const t of mediaStream.getTracks()) t.stop();
+        }
+        mediaStream = null;
+
+        mediaRecorder = null;
+        segmentChunks = [];
+        pendingSend = false;
+        stoppingForSend = false;
+
+        recState = "idle";
+        // ❌ IMPORTANT: DO NOT force waitingForPython=false here (it can desync with Python)
+        // waitingForPython = false;
+      }
+
+      function applyMicPaused() {
+        if (!mediaStream) return;
+        const tracks = mediaStream.getAudioTracks();
+        for (const t of tracks) {
+          t.enabled = !args.micPaused;
+        }
+      }
+
+      function scheduleResumeIfNeeded() {
+        if (!args.micPaused) return;
+        const ms = Number(args.resumeAfterMs || 0);
+        if (!ms || ms <= 0) return;
+
+        // Key includes restartNonce to re-schedule after Python reruns
+        const key = `${args.restartNonce}:${ms}`;
+        if (key === lastResumeKey) return;
+        lastResumeKey = key;
+
+        if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
+
+        //resumeTimer = setTimeout(() => {
+         // Streamlit.setComponentValue({ event: "resume" });
+       // }, ms);
+      }
+
+      function blobToDataUrl(blob) {
+        return new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result));
+          r.onerror = reject;
+          r.readAsDataURL(blob);
+        });
+      }
+
+      // ----------------------------
+      // Meter utilities
+      // ----------------------------
+      function dbfsFromRms(rms) {
+        const v = Math.max(rms, 1e-8);
+        return 20 * Math.log10(v);
+      }
+
+      function rmsFromTimeDomain(data) {
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+        return Math.sqrt(sum / data.length);
+      }
+
+      function tickMeterLoop() {
+        if (!analyser || !mediaRecorder || mediaRecorder.state === "inactive") return;
+
+        const buf = new Float32Array(analyser.fftSize);
+        analyser.getFloatTimeDomainData(buf);
+        const rms = rmsFromTimeDomain(buf);
+        const db = dbfsFromRms(rms);
+
+        const pct = Math.max(0, Math.min(100, (db + 80) * 1.25));
+        elBar.style.width = pct + "%";
+        elDebug.textContent = `level=${db.toFixed(1)} dBFS`;
+
+        meterRaf = requestAnimationFrame(tickMeterLoop);
+      }
+
+      function createRecorder() {
+        const prefer =
+          mimeSupported("audio/webm;codecs=opus") || mimeSupported("audio/webm") || "";
+        const options = prefer ? { mimeType: prefer } : undefined;
+
+        mediaRecorder = new MediaRecorder(mediaStream, options);
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) segmentChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          // Only send if stopAndSend triggered it
+          if (!pendingSend) return;
+
+          try {
+            pendingSend = false;
+
+            if (!segmentChunks.length) {
+              setStatus("No audio captured.");
+              recState = "paused";
+              setUiIdle();
+              updateCfgLabel();
+              return;
+            }
+
+            const blob = new Blob(segmentChunks, {
+              type: mediaRecorder.mimeType || "audio/webm",
+            });
+            segmentChunks = [];
+
+            const dataUrl = await blobToDataUrl(blob);
+            segmentId += 1;
+
+            // ✅ lock until Python finishes
+            waitingForPython = true;
+
+            // ✅ Immediately mute mic locally (before Python reruns)
+            args.micPaused = true;
+            args.resumeAfterMs = 0;
+            applyMicPaused();
+
+            Streamlit.setComponentValue({
+              event: "segment",
+              segment_id: segmentId,
+              audio_b64: dataUrl,
+              mime: blob.type || "audio/webm",
+            });
+
+            recState = "paused";
+            cleanupTimersOnly();
+
+            setStatus("Sent ✅ Waiting for reply... (mic muted)");
+            if (args.keepListeningUi) {
+              setUiRecording();
+            } else {
+              setUiIdle();
+            }
+
+            updateCfgLabel();
+          } catch (err) {
+            setErr("onstop/send error: " + err);
+          } finally {
+            stoppingForSend = false;
+          }
+        };
+      }
+
+      function stopAndSend(reasonText) {
+        if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+        if (stoppingForSend) return;
+
+        stoppingForSend = true;
+        pendingSend = true;
+
+        try {
+          setStatus(reasonText || "Sending...");
+          mediaRecorder.stop();
+        } catch (err) {
+          stoppingForSend = false;
+          pendingSend = false;
+          setErr("stopAndSend error: " + err);
+        }
+      }
+
+      function startTimedWindow() {
+        if (!mediaStream) return;
+
+        // Never record while waiting for Python
+        if (waitingForPython) {
+          recState = "paused";
+          setStatus("Waiting for reply... (locked)");
+          setUiRecording();
+          updateCfgLabel();
+          return;
+        }
+
+        // Never record if micPaused
+        if (args.micPaused) {
+          recState = "paused";
+          setStatus("Waiting... (mic muted)");
+          setUiRecording();
+          updateCfgLabel();
+          scheduleResumeIfNeeded();
+          return;
+        }
+
+        applyMicPaused();
+
+        segmentChunks = [];
+        pendingSend = false;
+        stoppingForSend = false;
+
+        createRecorder();
+        mediaRecorder.start();
+
+        recState = "recording";
+        updateCfgLabel();
+        setUiRecording();
+
+      setStatus("Recording... Tap Stop when you're done.");
+      tickMeterLoop();
+
+      }
+
+      async function startRecording() {
+        setErr("");
+
+        // If locked/paused, ask Python to resume and wait for next render
+        if (waitingForPython || args.micPaused) {
+          Streamlit.setComponentValue({ event: "resume" });
+          setStatus("Unlocking... (waiting for Streamlit)");
+          return;
+        }
+
+        clearResumeTimers();
+
+        try {
+          if (mediaStream) {
+            startTimedWindow();
+            return;
+          }
+
+          recState = "recording";
+          updateCfgLabel();
+          setStatus("Requesting microphone permission...");
+
+          mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const source = audioCtx.createMediaStreamSource(mediaStream);
+
+          analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 2048;
+          source.connect(analyser);
+
+          startTimedWindow();
+        } catch (err) {
+          setErr("Microphone error: " + err);
+          setStatus("Idle.");
+          cleanupAll();
+          setUiIdle();
+          updateCfgLabel();
+        }
+      }
+
+      function stopRecording() {
+        // ✅ Tell Python to cancel any in-flight processing
+        Streamlit.setComponentValue({ event: "stop" });
+
+        // ✅ Cancel any scheduled resume
+        clearResumeTimers();
+
+        setStatus("Stopping...");
+        try {
+          if (mediaRecorder && mediaRecorder.state !== "inactive") {
+            // We are NOT sending the segment on manual stop
+            pendingSend = false;
+            stoppingForSend = false;
+            mediaRecorder.stop();
+          }
+        } catch (e) {
+          setErr("Stop error: " + e);
+        } finally {
+          cleanupAll();
+          setUiIdle();
+          setStatus("Idle.");
+          updateCfgLabel();
+        }
+      }
+
+      // ----------------------------
+      // Streamlit render updates
+      // ----------------------------
+      Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, (event) => {
+        const nextArgs = (event && event.detail && event.detail.args) ? event.detail.args : {};
+        args = { ...args, ...nextArgs };
+
+        // If Python unpaused mic, we are no longer waiting
+        if (!args.micPaused) {
+          waitingForPython = false;
+        }
+
+        applyMicPaused();
+        scheduleResumeIfNeeded();
+
+        // Fallback: if stuck muted + waiting but no resumeAfterMs, poke resume once
+        if (args.micPaused && waitingForPython && (!args.resumeAfterMs || args.resumeAfterMs <= 0)) {
+          if (!fallbackResumeArmed) {
+            fallbackResumeArmed = true;
+            setTimeout(() => {
+              fallbackResumeArmed = false;
+              Streamlit.setComponentValue({ event: "resume" });
+            }, 2000);
+          }
+        } else {
+          fallbackResumeArmed = false;
+        }
+
+        // Track restartNonce
+        if (typeof args.restartNonce === "number" && args.restartNonce !== lastRestartNonce) {
+          lastRestartNonce = args.restartNonce;
+        }
+
+        // Auto-start next recording only when safe
+         // const recorderInactive = (!mediaRecorder || mediaRecorder.state === "inactive");
+         // if (mediaStream && !args.micPaused && !waitingForPython && recorderInactive &&
+          //    (recState === "paused" || recState === "idle")) {
+          //  startTimedWindow();  }
+
+        updateCfgLabel();
+
+        if (recState === "idle") {
+          setStatus("Ready ✅ (render received)");
+          setUiIdle();
+          if (args.autoStart && !mediaStream) startRecording();
+        }
+
+        Streamlit.setFrameHeight();
+      });
+
+      // Buttons
+      elStart.addEventListener("click", startRecording);
+      elStop.addEventListener("click", () => stopAndSend("Sending..."));
+
+      updateCfgLabel();
+      setUiIdle();
+
+      Streamlit.setComponentReady();
+      Streamlit.setFrameHeight();
+    </script>
+  </body>
+</html>
