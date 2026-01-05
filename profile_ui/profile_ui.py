@@ -1,9 +1,24 @@
-# profile/profile_ui.py
+# File: angewandte-generative-ki/profile_ui/profile_ui.py
 import base64
-import profile
+import json
+import os
 import streamlit as st
-from storage.profile_manager import save_state_for_current_user
 from .profile_css import inject_profile_css
+
+# Try project-wide storage manager; fallback for development/IDE.
+try:
+    from storage.profile_manager import save_state_for_current_user  # type: ignore
+except Exception:
+    def save_state_for_current_user() -> None:
+        """Fallback: save profile locally as .profile_backup.json (dev)."""
+        try:
+            p = st.session_state.get("profile", {})
+            path = os.path.join(os.getcwd(), ".profile_backup.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(p, f, ensure_ascii=False, indent=2)
+            st.session_state["_profile_backup_path"] = path
+        except Exception:
+            pass
 
 
 def _format_value(value, suffix: str = "") -> str:
@@ -42,6 +57,7 @@ def _render_avatar_section(profile: dict) -> None:
             "Upload picture",
             type=["jpg", "jpeg", "png"],
             key="profile_avatar_uploader",
+            label_visibility="collapsed",
         )
 
         remove_clicked = False
@@ -87,18 +103,49 @@ def _render_avatar_section(profile: dict) -> None:
 
 
 def _render_personal_info(profile: dict) -> None:
+    """
+    Render personal info using CSS classes from profile_css.py.
+    Desktop: 3 columns; Mobile: 2 columns (CSS handles sizes).
+    """
     st.subheader("Personal information")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Weight", _format_value(profile.get("weight"), " kg"))
-        st.metric("Height", _format_value(profile.get("height"), " cm"))
-    with col2:
-        st.metric("Age", _format_value(profile.get("age"), " years"))
-        st.metric("Gender", _format_value(profile.get("gender")))
-    with col3:
-        st.metric("Activity level", _format_value(profile.get("activity")))
-        st.metric("Workouts per week", _format_value(profile.get("workout_days")))
+    weight = _format_value(profile.get("weight"), " kg")
+    height = _format_value(profile.get("height"), " cm")
+    age = _format_value(profile.get("age"), " years")
+    gender = _format_value(profile.get("gender"))
+    activity = _format_value(profile.get("activity"))
+    workouts = _format_value(profile.get("workout_days"))
+
+    grid_html = f"""
+    <div class="personal-info-grid">
+      <div class="personal-info-item">
+        <div class="personal-info-label">Weight</div>
+        <div class="personal-info-value">{weight}</div>
+      </div>
+      <div class="personal-info-item">
+        <div class="personal-info-label">Height</div>
+        <div class="personal-info-value">{height}</div>
+      </div>
+      <div class="personal-info-item">
+        <div class="personal-info-label">Age</div>
+        <div class="personal-info-value">{age}</div>
+      </div>
+      <div class="personal-info-item">
+        <div class="personal-info-label">Gender</div>
+        <div class="personal-info-value">{gender}</div>
+      </div>
+      <div class="personal-info-item">
+        <div class="personal-info-label">Activity level</div>
+        <div class="personal-info-value">{activity}</div>
+      </div>
+      <div class="personal-info-item">
+        <div class="personal-info-label">Workouts per week</div>
+        <div class="personal-info-value">{workouts}</div>
+      </div>
+    </div>
+    """
+
+    st.markdown(grid_html, unsafe_allow_html=True)
 
     st.write("")
     st.write("**Goal:**", _format_value(profile.get("goal")))
@@ -138,7 +185,6 @@ def _render_health_section(profile: dict) -> None:
         _render_edit_health_form(profile)
 
 
-
 def _render_edit_personal_form(profile: dict) -> None:
     with st.form("edit_personal_form"):
         name = st.text_input("Name", value=profile.get("name", ""))
@@ -155,8 +201,6 @@ def _render_edit_personal_form(profile: dict) -> None:
                 value=str(profile.get("age", "")),
             )
 
-
-    
         submitted = st.form_submit_button("Save changes")
 
         if submitted:
@@ -167,8 +211,6 @@ def _render_edit_personal_form(profile: dict) -> None:
             except ValueError:
                 errors.append("Weight must be a number.")
                 weight = profile.get("weight")
-
-            
 
             try:
                 age = int(age_str)
@@ -188,6 +230,7 @@ def _render_edit_personal_form(profile: dict) -> None:
             save_state_for_current_user()
             st.success("Personal information updated.")
             st.rerun()
+
 
 def _render_edit_health_form(profile: dict) -> None:
     with st.form("edit_health_form"):
@@ -228,7 +271,6 @@ def _render_edit_health_form(profile: dict) -> None:
             clean_limits = [l for l in limitations if l != "No significant limitation"]
             profile["health_issues"] = ", ".join(health_conditions + clean_limits)
 
-
             st.session_state["profile"] = profile
             save_state_for_current_user()
             st.success("Health information updated.")
@@ -243,6 +285,8 @@ def render_profile_page() -> None:
         st.info("No profile found yet. Please fill in the form first.")
         if st.button("Go to form"):
             st.session_state.page = "form"
+            st.session_state.onboarding_step = 0
+            st.rerun()
         return
 
     # autofill email from auth session keys if missing
@@ -260,8 +304,13 @@ def render_profile_page() -> None:
     name = profile.get("name") or "Profile"
     st.header(name)
 
+    # wrapper can stay (CSS no longer depends on it)
+    st.markdown('<div class="profile-area">', unsafe_allow_html=True)
+
     _render_avatar_section(profile)
     st.write("---")
     _render_personal_info(profile)
     st.write("---")
     _render_health_section(profile)
+
+    st.markdown("</div>", unsafe_allow_html=True)
