@@ -20,7 +20,6 @@ def show_auth_page():
     # Inject CSS for auth page
     inject_auth_css()
 
-    st.title("Stay Healthy AI")
 
     # ---------- LOGIN VIEW ---------- #
     if view == "login":
