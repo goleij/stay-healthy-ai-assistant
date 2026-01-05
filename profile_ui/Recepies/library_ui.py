@@ -47,7 +47,3 @@ def render_library_page():
             with st.expander(title, expanded=False):
                 st.markdown(last_list)
 
-    st.write("---")
-    if st.button("Back to profile"):
-        st.session_state.page = "profile"
-        st.rerun()

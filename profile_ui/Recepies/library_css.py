@@ -5,6 +5,15 @@ LIBRARY_CSS = """
 <style>
 
 
+
+div[data-testid="stHeader"] h1,
+div[data-testid="stHeader"] h2,
+div[data-testid="stHeader"] h3 {
+  font-size: 0.6rem !important;   
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+}
+
 /* Make sure page fills the viewport */
 .stMain,
 .stMainBlockContainer{
@@ -55,7 +64,7 @@ html, body{
   --primary: #009245;
   --primary-hover: #F5C400;
 
-  --fs-h1: 1.8rem;
+  --fs-h1: 0.1rem;
   --fs-h2: 1.3rem;
   --fs-h3: 1.1rem;
   --fs-button: 0.95rem;
@@ -106,6 +115,17 @@ h3{ font-size: var(--fs-h3); }
 .stButton > button:hover{
   background-color: var(--primary-hover) !important;
   color: var(--text) !important;
+}
+
+/* =========================================================
+   STREAMLIT HEADER – MAKE SMALLER
+========================================================= */
+div[data-testid="stHeader"] h1,
+div[data-testid="stHeader"] h2,
+div[data-testid="stHeader"] h3 {
+  font-size: 0.6rem !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
 }
 
 /* Focus */
