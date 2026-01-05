@@ -385,13 +385,13 @@ body, .stApp, .stApp p, .stMarkdown, .stMarkdown p, .meditation-text, .stTextInp
 
 def inject_meditation_css():
         st.markdown(MEDITATION_CSS, unsafe_allow_html=True)
-        st.markdown('''
-<div class="meditation-bg-svg">
-<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="200" viewBox="0 0 414 198" preserveAspectRatio="none">
-    <g>
-        <path d="M1.681,786.1s137.4-128.75,294.973-84.552,220.989-280.56,220.989-280.56v605.319H-8.888Z" transform="translate(-20.721 -630.787)" fill="#009245" opacity="0.16"/>
-        <path d="M1.681,786.1s137.4-128.75,294.973-84.552,220.989-280.56,220.989-280.56v605.319H-8.888Z" transform="translate(-24.289 -602.249)" fill="#009245"/>
-    </g>
-</svg>
-</div>
-''', unsafe_allow_html=True)
+        #st.markdown('''
+#<div class="meditation-bg-svg">
+#<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="200" viewBox="0 0 414 198" preserveAspectRatio="none">
+    #<g>
+        #<path d="M1.681,786.1s137.4-128.75,294.973-84.552,220.989-280.56,220.989-280.56v605.319H-8.888Z" transform="translate(-20.721 -630.787)" fill="#009245" opacity="0.16"/>
+        #<path d="M1.681,786.1s137.4-128.75,294.973-84.552,220.989-280.56,220.989-280.56v605.319H-8.888Z" transform="translate(-24.289 -602.249)" fill="#009245"/>
+    #</g>
+#</svg>
+#</div>
+#''', unsafe_allow_html=True)
