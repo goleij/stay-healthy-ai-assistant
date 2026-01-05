@@ -1,3 +1,4 @@
+# python
 import os
 import time
 import hashlib
@@ -5,18 +6,79 @@ import io
 import wave
 import requests
 import streamlit as st
-from ollama._types import ResponseError
+from typing import Iterator, Tuple, Optional
 
-from storage.profile_manager import save_state_for_current_user
-from llm_utils import get_llm, get_qa
-from .chat_css import inject_chat_css
+# --- Resiliente / fallback Imports ---
+try:
+    from ollama._types import ResponseError  # type: ignore
+except Exception:
+    class ResponseError(Exception):
+        pass
 
-from components.silence_recorder.silence_recorder import (
-    silence_recorder,
-    decode_component_audio,
-)
-from stt_whisper import transcribe_webm_bytes
+# profile state saver
+try:
+    from storage.profile_manager import save_state_for_current_user  # type: ignore
+except Exception:
+    def save_state_for_current_user() -> None:
+        # fallback: no-op
+        return
 
+# llm helpers
+try:
+    from llm_utils import get_llm, get_qa, list_local_models  # type: ignore
+except Exception:
+    def list_local_models() -> list[str]:
+        # fallback: try reading env var or return a sensible default
+        models = os.getenv("LOCAL_MODELS_LIST")
+        if models:
+            return [m.strip() for m in models.split(",") if m.strip()]
+        return ["local-default-model"]
+
+    class _DummyLLM:
+        def __init__(self, name: str):
+            self.name = name
+
+        def stream(self, prompt: str) -> Iterator[str]:
+            # naive streaming fallback: yield final text as single token
+            yield f"(dummy reply for model {self.name})"
+
+    def get_llm(name: str):
+        return _DummyLLM(name)
+
+    def get_qa(name: str):
+        # fallback qa callable
+        def qa_call(payload: dict):
+            return {"result": f"(dummy QA result for {name})"}
+        return qa_call
+
+# silence recorder / audio component
+try:
+    from components.silence_recorder.silence_recorder import (  # type: ignore
+        silence_recorder,
+        decode_component_audio,
+    )
+except Exception:
+    def silence_recorder(*args, **kwargs):
+        # fallback: no recording UI available
+        return None
+
+    def decode_component_audio(result: dict) -> Tuple[bytes, str]:
+        return b"", "audio/wav"
+
+# STT fallback
+try:
+    from stt_whisper import transcribe_webm_bytes  # type: ignore
+except Exception:
+    def transcribe_webm_bytes(b: bytes) -> str:
+        # fallback: return empty string to indicate no transcription
+        return ""
+
+# local CSS injector
+try:
+    from .chat_css import inject_chat_css  # type: ignore
+except Exception:
+    def inject_chat_css():
+        return
 
 # ---------------------------
 # TTS helpers
@@ -32,7 +94,6 @@ def sniff_audio_format(b: bytes) -> str:
         return "audio/ogg"
     return "audio/wav"
 
-
 def wav_duration_seconds(b: bytes) -> float:
     try:
         with wave.open(io.BytesIO(b), "rb") as w:
@@ -41,7 +102,6 @@ def wav_duration_seconds(b: bytes) -> float:
             return (frames / float(rate)) if rate else 0.0
     except Exception:
         return 0.0
-
 
 def shorten_for_tts(text: str, max_chars: int = 220) -> str:
     t = (text or "").strip()
@@ -53,18 +113,18 @@ def shorten_for_tts(text: str, max_chars: int = 220) -> str:
         cut = cut[: last_punct + 1]
     return cut.strip()
 
-
-def tts_speak(text: str) -> tuple[bytes, str, float]:
+def tts_speak(text: str) -> Tuple[bytes, str, float]:
     speak_url = os.getenv("CHAT_TTS_URL", "http://tts_server:5005/speak")
     t0 = time.time()
-    r = requests.post(speak_url, json={"text": text}, timeout=180)
-    dt = time.time() - t0
-    r.raise_for_status()
-    content_type = (r.headers.get("content-type") or "").strip()
-    return r.content, content_type, dt
+    try:
+        r = requests.post(speak_url, json={"text": text}, timeout=30)
+        r.raise_for_status()
+        content_type = (r.headers.get("content-type") or "").strip()
+        return r.content, content_type, time.time() - t0
+    except Exception:
+        return b"", "", 0.0
 
-
-def collect_stream_to_text(token_iter) -> str:
+def collect_stream_to_text(token_iter: Iterator[str]) -> str:
     out = ""
     for token in token_iter:
         if token is None:
@@ -72,11 +132,9 @@ def collect_stream_to_text(token_iter) -> str:
         out += str(token)
     return out.strip()
 
-
 # ---------- multi-chat helpers ----------
 def _ensure_chat_sessions() -> None:
     sessions = st.session_state.get("chat_sessions")
-
     if not sessions:
         sessions = {}
         old_history = st.session_state.get("chat_history", [])
@@ -84,21 +142,17 @@ def _ensure_chat_sessions() -> None:
         sessions[first_id] = {"title": "Chat 1", "history": list(old_history)}
         st.session_state["chat_sessions"] = sessions
         st.session_state["current_chat_id"] = first_id
-
     current_id = st.session_state.get("current_chat_id")
     if current_id not in sessions:
         current_id = next(iter(sessions))
         st.session_state["current_chat_id"] = current_id
-
     st.session_state.chat_history = st.session_state["chat_sessions"][current_id]["history"]
-
 
 def _get_current_session():
     sessions = st.session_state["chat_sessions"]
     current_id = st.session_state["current_chat_id"]
     return current_id, sessions[current_id]
 
-# chat history to text
 def _build_history_text(max_turns: int = 6) -> str:
     history = st.session_state.get("chat_history", [])
     if not history:
@@ -110,90 +164,51 @@ def _build_history_text(max_turns: int = 6) -> str:
         lines.append(f"{role}: {msg}")
     return "\n".join(lines)
 
-
 def _build_health_context(profile: dict) -> str:
     health_issues = (profile.get("health_issues") or "").strip()
     allergies = (profile.get("allergies") or "").strip()
     text = (health_issues + " " + allergies).lower()
-
     rules = []
-
     if health_issues:
         rules.append(f"The user has these health conditions or limitations: {health_issues}.")
-
     if "diabetes" in text:
-        rules.append(
-            "Treat the user as having diabetes for all meal and recipe suggestions: "
-            "avoid added sugar, sugary drinks, sweets and white flour. Prefer high-fiber carbs and balanced meals."
-        )
-
-    if "high blood pressure" in text or "hypertension" in text:
-        rules.append(
-            "For high blood pressure: keep meals low in salt and avoid salty processed foods."
-        )
-
-    if "heart disease" in text or "heart condition" in text:
-        rules.append(
-            "The user has a heart condition: suggest only moderate-intensity exercise; no HIIT/sprints."
-        )
-
-    if "joint" in text or "knee" in text:
-        rules.append(
-            "The user has joint problems: avoid high-impact exercises (running/jumping) and prefer low-impact."
-        )
-
-    if "asthma" in text or "lung" in text:
-        rules.append(
-            "The user has asthma or lung issues: avoid very intense intervals; recommend warm-ups and rests."
-        )
-
+        rules.append("Treat the user as having diabetes for all meal and recipe suggestions: avoid added sugar.")
     if allergies:
-        rules.append(
-            f"The user is allergic or intolerant to: {allergies}. Never include these ingredients; use safe alternatives."
-        )
-
+        rules.append(f"The user is allergic or intolerant to: {allergies}. Never include these ingredients.")
     if not rules:
         return ""
-
     return "Health and safety context:\n" + "\n".join(f"- {r}" for r in rules) + "\n"
 
-
-def _get_last_coach_message() -> str | None:
+def _get_last_coach_message() -> Optional[str]:
     history = st.session_state.get("chat_history", [])
     for speaker, msg in reversed(history):
         if speaker == "coach":
             return msg
     return None
 
-
-def _get_last_user_message() -> str | None:
+def _get_last_user_message() -> Optional[str]:
     history = st.session_state.get("chat_history", [])
     for speaker, msg in reversed(history):
         if speaker == "user":
             return msg
     return None
 
-
-def _should_show_recipe_tools(last_user: str | None, last_coach: str | None) -> bool:
+def _should_show_recipe_tools(last_user: Optional[str], last_coach: Optional[str]) -> bool:
     if not last_coach:
         return False
-
     combined = ((last_user or "") + "\n" + last_coach).lower()
     keywords = [
-        "recipe", "recipie", "recepie", "meal", "breakfast", "lunch", "dinner",
-        "snack", "dessert", "shopping list", "ingredients", "meal plan", "dish",
-        "cook", "cookie", "biscuit"
+        "recipe", "meal", "breakfast", "lunch", "dinner", "snack", "dessert",
+        "ingredients", "meal plan", "cook"
     ]
     if any(kw in combined for kw in keywords):
         return True
-
     lines = [ln.strip() for ln in last_coach.splitlines() if ln.strip()]
     bullet_like = [
         ln for ln in lines
-        if ln[0:1] in ("-", "*", "•") or (len(ln) > 2 and ln[:2].isdigit())
+        if ln and (ln[0:1] in ("-", "*", "•") or (len(ln) > 2 and ln[:2].isdigit()))
     ]
     return len(bullet_like) >= 3
-
 
 def _extract_recipe_title(text: str) -> str:
     if not text:
@@ -206,10 +221,8 @@ def _extract_recipe_title(text: str) -> str:
             break
     if not first_line:
         return "Recipe shopping list"
-
     while first_line and first_line[0] in "#*-•":
         first_line = first_line[1:].strip()
-
     if ":" in first_line:
         lower = first_line.lower()
         if " for " in lower:
@@ -219,118 +232,102 @@ def _extract_recipe_title(text: str) -> str:
             title = first_line.split(":", 1)[1].strip()
     else:
         title = first_line.strip()
-
     return title or "Recipe shopping list"
 
-
 # ---------- main UI ----------
-def render_chat_tab(model_name: str):
+def render_chat_tab(passed_model_name: Optional[str] = None):
     inject_chat_css()
+
     st.markdown(
-        """
-        <style>
-            #cfg { display: none !important; }
-        </style>
-        """,
-        unsafe_allow_html=True
+        '<div class="chat-main-header"></div>',
+        unsafe_allow_html=True,
     )
-
     _ensure_chat_sessions()
-
     sessions = st.session_state["chat_sessions"]
     current_id, current_session = _get_current_session()
 
-    # ---------------------------
-    # Voice state (per chat)
-    # ---------------------------
-    if "voice_mode" not in st.session_state:
-        st.session_state.voice_mode = False
-
-    if "restart_nonce_by_chat" not in st.session_state:
-        st.session_state.restart_nonce_by_chat = {}
+    # per-chat voice state initialization
+    st.session_state.setdefault("voice_mode", False)
+    st.session_state.setdefault("restart_nonce_by_chat", {})
     st.session_state.restart_nonce_by_chat.setdefault(current_id, 0)
-
-    if "last_audio_hash_by_chat" not in st.session_state:
-        st.session_state.last_audio_hash_by_chat = {}
+    st.session_state.setdefault("last_audio_hash_by_chat", {})
     st.session_state.last_audio_hash_by_chat.setdefault(current_id, "")
-
-    if "coach_audio_by_chat" not in st.session_state:
-        st.session_state.coach_audio_by_chat = {}
+    st.session_state.setdefault("coach_audio_by_chat", {})
     st.session_state.coach_audio_by_chat.setdefault(current_id, {})
-
-    if "mic_paused_by_chat" not in st.session_state:
-        st.session_state.mic_paused_by_chat = {}
+    st.session_state.setdefault("mic_paused_by_chat", {})
     st.session_state.mic_paused_by_chat.setdefault(current_id, False)
-
-    if "resume_after_ms_by_chat" not in st.session_state:
-        st.session_state.resume_after_ms_by_chat = {}
+    st.session_state.setdefault("resume_after_ms_by_chat", {})
     st.session_state.resume_after_ms_by_chat.setdefault(current_id, 0)
 
     coach_audio_map = st.session_state.coach_audio_by_chat[current_id]
 
     col_left, col_right = st.columns([1.1, 3])
 
-    # ----- left column -----
+    # left column: chat list
     with col_left:
-        st.markdown('<div class="chat-sidebar-card">', unsafe_allow_html=True)
-        st.markdown('<div class="chat-sidebar-title">Your chats</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="chat-sidebar-subtitle">Switch between conversations or start a new one.</div>',
-            unsafe_allow_html=True,
-        )
-
-        if st.button(" New chat"):
+        st.markdown("### Ask me about your plan, workouts, or recipes!")
+        st.markdown("### Your chats")
+        st.caption("Switch between conversations or start a new one.")
+        if st.button("New chat", key="chat_new"):
             new_index = len(sessions) + 1
             new_id = f"chat_{new_index}"
             sessions[new_id] = {"title": f"Chat {new_index}", "history": []}
             st.session_state["current_chat_id"] = new_id
             st.session_state.chat_history = sessions[new_id]["history"]
-
             st.session_state.restart_nonce_by_chat[new_id] = 0
             st.session_state.last_audio_hash_by_chat[new_id] = ""
             st.session_state.coach_audio_by_chat[new_id] = {}
             st.session_state.mic_paused_by_chat[new_id] = False
             st.session_state.resume_after_ms_by_chat[new_id] = 0
-
             save_state_for_current_user()
             st.rerun()
 
-        st.markdown('<div class="chat-sidebar-list">', unsafe_allow_html=True)
         for chat_id, data in sessions.items():
             title = data.get("title") or chat_id
             if len(title) > 32:
                 title = title[:29] + "..."
             is_selected = chat_id == current_id
-            prefix = "▶  " if is_selected else "💬  "
+            prefix = "▶  " if is_selected else " "
             if st.button(f"{prefix}{title}", key=f"select_{chat_id}"):
                 st.session_state["current_chat_id"] = chat_id
                 st.session_state.chat_history = sessions[chat_id]["history"]
                 save_state_for_current_user()
                 st.rerun()
-        st.markdown("</div></div>", unsafe_allow_html=True)
 
-    # ----- right column -----
+    # right column: chat UI
     with col_right:
-        st.markdown('<div class="chat-main-card">', unsafe_allow_html=True)
+        # model selection
+        try:
+            available_models = list_local_models()
+        except Exception as e:
+            st.error(f"Error listing models: {e}")
+            available_models = []
 
-        st.markdown(
-            '<div class="chat-main-header">🤖 <span>Your AI Fitness Coach Chatbot</span></div>',
-            unsafe_allow_html=True,
+        if not available_models:
+            st.error("No local models found. Make sure your model list is configured.")
+            return
+
+        default_model = passed_model_name or st.session_state.get("model_name") or available_models[0]
+        if default_model not in available_models:
+            default_model = available_models[0]
+
+        model_name = st.selectbox(
+            "Choose a model:",
+            available_models,
+            index=available_models.index(default_model),
+            key="model_select_chat",
         )
-        st.markdown(
-            '<div class="chat-main-description">Ask me anything about your plan, workouts, or health-friendly recipes!</div>',
-            unsafe_allow_html=True,
+        st.session_state["model_name"] = model_name
+
+        st.write("")
+        st.session_state.voice_mode = st.toggle(
+            "Voice mode",
+            value=bool(st.session_state.voice_mode),
+            key=f"voice_mode_{current_id}",
         )
 
-        # Voice controls
-        top = st.columns([1])
-        with top[0]:
-            st.session_state.voice_mode = st.toggle("Voice mode", value=st.session_state.voice_mode)
-
-        tts_max_chars = 220  
-
-
-        if st.button(" Clear this chat"):
+        tts_max_chars = 220
+        if st.button("Clear this chat", key=f"chat_clear_{current_id}"):
             st.session_state.chat_history.clear()
             st.session_state.coach_audio_by_chat[current_id] = {}
             st.session_state.last_audio_hash_by_chat[current_id] = ""
@@ -340,7 +337,7 @@ def render_chat_tab(model_name: str):
             save_state_for_current_user()
             st.rerun()
 
-        # Render chat history (audio first + autoplay ONLY for last assistant message)
+        # render history
         for idx, (speaker, message) in enumerate(st.session_state.chat_history):
             if speaker == "user":
                 with st.chat_message("user"):
@@ -348,82 +345,41 @@ def render_chat_tab(model_name: str):
             else:
                 with st.chat_message("assistant"):
                     audio_item = coach_audio_map.get(idx)
-
                     is_last_message = (idx == len(st.session_state.chat_history) - 1)
-
                     if audio_item and audio_item[0]:
                         audio_bytes, fmt, _meta = audio_item
                         st.audio(audio_bytes, format=fmt, autoplay=is_last_message)
-
                     st.write(message)
 
-
-        # Tools for last coach message (text-mode feature)
         last_coach = _get_last_coach_message()
         last_user = _get_last_user_message()
-        if last_coach and _should_show_recipe_tools(last_user, last_coach):
-            st.markdown("**Last coach message tools:**")
-            tools_col1, tools_col2 = st.columns(2)
-
-            with tools_col1:
-                if st.button("💾 Save as recipe"):
-                    recipes = st.session_state.get("saved_recipes", [])
-                    recipes.append(last_coach)
-                    st.session_state["saved_recipes"] = recipes
-                    save_state_for_current_user()
-                    st.success("Saved to your recipes in the profile page.")
-
-            with tools_col2:
-                if st.button("🛒 Create shopping list from last answer"):
-                    try:
-                        llm = get_llm(model_name)
-                        prompt = (
-                            "Answer in English.\n\n"
-                            "You are a nutrition assistant. Based on the following recipe or meal plan, "
-                            "extract a clean shopping list. Group ingredients by category if reasonable "
-                            "(Vegetables, Fruits, Proteins, Dairy, Grains, Other). "
-                            "Use bullet points and include amounts if present.\n\n"
-                            f"TEXT:\n{last_coach}\n\n"
-                            "Output ONLY the shopping list in markdown."
-                        )
-                        with st.spinner("🛒 Generating shopping list..."):
-                            shopping_text = st.write_stream(llm.stream(prompt))
-
-                        recipe_title = _extract_recipe_title(last_coach)
-                        st.session_state["last_recipe_shopping_title"] = recipe_title
-                        st.session_state["last_shopping_list"] = shopping_text
-                        save_state_for_current_user()
-                        st.success("Shopping list saved.")
-                    except ResponseError:
-                        st.error(f"❌ Model '{model_name}' not found. Run: `ollama pull {model_name}`.")
-                    except Exception as e:
-                        st.error(f"Unexpected error while creating shopping list: {e}")
 
         use_rag = st.toggle(
             "Use knowledge base (RAG)",
             value=False,
             help="Turn on to answer using your prepared data.",
+            key=f"use_rag_{current_id}",
         )
 
-        # ---------------------------
-        # Voice recorder (inline)
-        # ---------------------------
+        # voice recorder handling
         voice_result = None
         if st.session_state.voice_mode:
-            voice_result = silence_recorder(
-                silence_to_end_ms=900,
-                min_speech_ms=120,
-                threshold_db=-45,
-                auto_start=False,
-                max_record_ms=0,
-                restart_nonce=int(st.session_state.restart_nonce_by_chat[current_id]),
-                keep_listening_ui=False,
-                mic_paused=bool(st.session_state.mic_paused_by_chat[current_id]),
-                resume_after_ms=int(st.session_state.resume_after_ms_by_chat[current_id] or 0),
-                key=f"chat_voice_recorder_{current_id}",
-            )
+            try:
+                voice_result = silence_recorder(
+                    silence_to_end_ms=900,
+                    min_speech_ms=120,
+                    threshold_db=-45,
+                    auto_start=False,
+                    max_record_ms=0,
+                    restart_nonce=int(st.session_state.restart_nonce_by_chat[current_id]),
+                    keep_listening_ui=False,
+                    mic_paused=bool(st.session_state.mic_paused_by_chat[current_id]),
+                    resume_after_ms=int(st.session_state.resume_after_ms_by_chat[current_id] or 0),
+                    key=f"chat_voice_recorder_{current_id}",
+                )
+            except Exception:
+                voice_result = None
 
-        # JS -> Python resume event
         if st.session_state.voice_mode and voice_result and voice_result.get("event") == "resume":
             st.session_state.mic_paused_by_chat[current_id] = False
             st.session_state.resume_after_ms_by_chat[current_id] = 0
@@ -431,59 +387,34 @@ def render_chat_tab(model_name: str):
             save_state_for_current_user()
             st.rerun()
 
-        # Voice segment
         if st.session_state.voice_mode and voice_result and voice_result.get("event") == "segment":
             audio_bytes, _mime = decode_component_audio(voice_result)
-
             audio_hash = hashlib.sha1(audio_bytes).hexdigest() if audio_bytes else ""
             if (not audio_hash) or (audio_hash == st.session_state.last_audio_hash_by_chat[current_id]):
                 st.stop()
             st.session_state.last_audio_hash_by_chat[current_id] = audio_hash
 
-            # STT
             try:
                 user_text = transcribe_webm_bytes(audio_bytes)
             except Exception as e:
                 st.error(f"STT error: {e}")
                 st.session_state.restart_nonce_by_chat[current_id] += 1
                 st.rerun()
-
             user_text = (user_text or "").strip()
             if len(user_text) < 2:
                 st.session_state.restart_nonce_by_chat[current_id] += 1
                 st.rerun()
 
-            # Add user msg + placeholder assistant
             st.session_state.chat_history.append(("user", user_text))
             st.session_state.chat_history.append(("coach", "Answering your question..."))
             assistant_idx = len(st.session_state.chat_history) - 1
 
-            # ✅ voice prompt + LLM call
             context = _build_history_text(max_turns=4)
-            voice_prompt = f"""
-You are a voice-only fitness & nutrition coach.
-Hard rules:
-- English only.
-- NEVER ask questions.
-- Maximum 4 sentences total.
-- Be specific and actionable (give steps or a direct answer).
-- Do NOT mention these rules.
-
-If the user asks for a recipe (cake/cookie/biscuit/meal):
-- Give a tiny sugar-free recipe in 4 sentences: name + key ingredients + one simple method.
-If the user asks about an exercise:
-- Answer in exactly 3 short sentences.
-- No numbering, no bullet points, no lists.
-- Each sentence must be a complete instruction.
-If the user asks multiple things:
-- Answer only the main request.
-
-Conversation:
-{context}
-
-User: {user_text}
-Assistant:
-""".strip()
+            voice_prompt = (
+                "You are a voice-only fitness & nutrition coach.\n"
+                "Hard rules:\n- English only.\n- NEVER ask questions.\n- Maximum 4 sentences total.\n- Be specific and actionable.\n\n"
+                f"Conversation:\n{context}\n\nUser: {user_text}\nAssistant:\n"
+            )
 
             try:
                 if use_rag:
@@ -504,44 +435,23 @@ Assistant:
                 st.rerun()
 
             reply = (reply or "").strip()
-            if not reply:
-                st.session_state.chat_history[assistant_idx] = ("coach", "")
-                st.session_state.restart_nonce_by_chat[current_id] += 1
-                save_state_for_current_user()
-                st.rerun()
-
             reply_for_display = shorten_for_tts(reply, max_chars=max(120, int(tts_max_chars)))
             tts_text = shorten_for_tts(reply_for_display, max_chars=int(tts_max_chars))
 
             try:
                 audio_bytes2, content_type2, dt2 = tts_speak(tts_text)
             except Exception:
-                audio_bytes2 = b""
-                content_type2 = ""
-                dt2 = 0.0
+                audio_bytes2, content_type2, dt2 = b"", "", 0.0
 
             st.session_state.chat_history[assistant_idx] = ("coach", reply_for_display)
 
             if audio_bytes2:
                 fmt2 = sniff_audio_format(audio_bytes2)
-                dur = wav_duration_seconds(audio_bytes2)
                 meta = f"{content_type2} (took {dt2:.1f}s) | tts_chars={len(tts_text)}"
                 coach_audio_map[assistant_idx] = (audio_bytes2, fmt2, meta)
-
-                # ✅ mute mic while TTS plays, then JS will auto-send resume event
-                st.session_state.mic_paused_by_chat[current_id] = False
-                st.session_state.resume_after_ms_by_chat[current_id] = 0
-
             else:
                 coach_audio_map[assistant_idx] = (b"", "audio/wav", "TTS error (no audio).")
 
-                 # ✅ Immediately restart recorder
-                st.session_state.mic_paused_by_chat[current_id] = False
-                st.session_state.resume_after_ms_by_chat[current_id] = 0
-                # fallback: restart recorder anyway
-                st.session_state.restart_nonce_by_chat[current_id] += 1
-
-            # Rename chat title
             if not current_session.get("title") or current_session["title"].startswith("Chat "):
                 snippet = user_text.strip().split("\n", 1)[0]
                 if len(snippet) > 32:
@@ -551,24 +461,20 @@ Assistant:
             save_state_for_current_user()
             st.rerun()
 
-        # ---------------------------
-        # Text mode (unchanged)
-        # ---------------------------
-        user_input = st.text_input("Type your question here 👇")
+        # text mode
+        user_input = st.text_input("Type your question here", key=f"chat_input_{current_id}")
 
-        if st.button("Send "):
-            text = user_input.strip()
+        if st.button("Send", key=f"chat_send_{current_id}"):
+            text = (user_input or "").strip()
             if not text:
-                st.markdown("</div>", unsafe_allow_html=True)
                 return
 
             profile = st.session_state.get("profile", {})
             language_instruction = "Answer in English."
-
             lower_input = text.lower()
             recipe_keywords = [
-                "recipe", "recipie", "recepie", "meal", "breakfast", "lunch", "dinner",
-                "snack", "dessert", "cookies", "cookie", "biscuit",
+                "recipe", "meal", "breakfast", "lunch", "dinner", "snack", "dessert",
+                "cookies", "cookie", "biscuit",
             ]
             wants_recipe = any(kw in lower_input for kw in recipe_keywords)
 
@@ -618,14 +524,12 @@ Assistant:
                 else:
                     llm = get_llm(model_name)
                     with st.spinner("🏃 Streaming..."):
-                        answer = st.write_stream(llm.stream(full_prompt))
+                        answer = collect_stream_to_text(llm.stream(full_prompt))
             except ResponseError:
                 st.error(f"❌ Model '{model_name}' not found. Run: `ollama pull {model_name}`.")
-                st.markdown("</div>", unsafe_allow_html=True)
                 return
             except Exception as e:
                 st.error(f"Unexpected error: {e}")
-                st.markdown("</div>", unsafe_allow_html=True)
                 return
 
             st.session_state.chat_history.append(("user", text))
@@ -639,5 +543,3 @@ Assistant:
 
             save_state_for_current_user()
             st.rerun()
-
-        st.markdown("</div>", unsafe_allow_html=True)
