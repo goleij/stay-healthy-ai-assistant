@@ -1,59 +1,41 @@
-# landing/landing_ui.py
 import streamlit as st
+from pathlib import Path
 from .landing_css import inject_landing_css
 
 
 def show_landing_page() -> None:
     inject_landing_css()
 
-    # wrapper
-    st.markdown('<div class="landing-root">', unsafe_allow_html=True)
-    st.markdown('<div class="landing-card">', unsafe_allow_html=True)
+    img_path = Path(__file__).resolve().parents[1] / "Logo.png"
+    if not img_path.exists():
+        img_path = Path("Logo.png")
 
-    st.markdown(
-        '<div class="landing-title">Stay Healthy AI</div>',
-        unsafe_allow_html=True,
+    st.image(str(img_path), width=200)
+
+    badges = [
+        "Personalized Health – Training made for you.",
+        "Balanced Lifestyle – Nutrition, meditation, and recovery.",
+        "Smart Support – Recipes and guidance tailored to your goals.",
+    ]
+
+    badges_html = (
+        '<div class="landing-badges">'
+        + "".join(f'<span class="landing-badge">{b}</span>' for b in badges)
+        + "</div>"
     )
-    st.markdown(
-        '<div class="landing-subtitle">'
-        "Your personal AI coach for workouts, nutrition and healthy habits."
-        "</div>",
-        unsafe_allow_html=True,
+    st.markdown(badges_html, unsafe_allow_html=True)
+
+    primary = st.button(
+        "Get started – create account",
+        key="landing_signup",
+        use_container_width=True,
     )
 
-    st.markdown('<div class="landing-badges">', unsafe_allow_html=True)
-    st.markdown('<span class="landing-badge">7-day smart plans</span>', unsafe_allow_html=True)
-    st.markdown('<span class="landing-badge">Health-aware recipes</span>', unsafe_allow_html=True)
-    st.markdown('<span class="landing-badge">Chat with your coach</span>', unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        st.write(
-            "- Answer a few quick questions about your body and goals.\n"
-            "- Get a safe 7-day plan adapted to your health conditions.\n"
-            "- Ask your coach for workouts, meals and shopping lists."
-        )
-
-    with col2:
-        st.write("")
-
-    # Buttons row
-    col_primary, col_secondary = st.columns([1.3, 1])
-
-    with col_primary:
-        primary = st.button(
-            "Get started – create account",
-            key="landing_signup",
-            help="Go to sign up",
-        )
-    with col_secondary:
-        secondary = st.button(
-            "I already have an account",
-            key="landing_login",
-            help="Go to login",
-        )
+    secondary = st.button(
+        "I already have an account",
+        key="landing_login",
+        use_container_width=True,
+    )
 
     if primary:
         st.session_state["auth_stage"] = "auth"
@@ -64,7 +46,3 @@ def show_landing_page() -> None:
         st.session_state["auth_stage"] = "auth"
         st.session_state["auth_view"] = "login"
         st.rerun()
-
-
-
-    st.markdown("</div></div>", unsafe_allow_html=True)

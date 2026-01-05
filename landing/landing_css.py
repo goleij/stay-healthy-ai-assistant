@@ -1,89 +1,147 @@
-# landing/landing_css.py
+# python
+# File: `angewandte-generative-ki/landing/landing_css.py`
 import streamlit as st
 
 LANDING_CSS = """
 <style>
-.landing-root {
-    width: 100%;
-    padding-top: 1.2rem;          /* small space from very top */
-    padding-bottom: 3rem;
-    background: radial-gradient(
-        circle at top
-    );
+/* ========== Global: Fullscreen & kein Scrollen ========== */
+html, body {
+  height: 100%;
+  overflow: hidden !important;
 }
 
-
-.landing-title {
-    font-size: 32px;
-    font-weight: 700;
-    color: #0f172a;
-    margin-bottom: 8px;
+[data-testid="stAppViewContainer"] {
+  height: 100vh !important;
+  overflow: hidden !important;
 }
 
-.landing-subtitle {
-    font-size: 15px;
-    color: #64748b;
-    margin-bottom: 24px;
+/* Main zentriert */
+section.main {
+  height: 100vh !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  background: radial-gradient(
+    circle at top,
+    rgba(245,196,0,0.18),
+    rgba(255,255,255,1) 55%
+  ) !important;
 }
 
+/* Card – bewusst schmal & mobile-like */
+section.main .block-container {
+  width: min(380px, 92vw) !important;
+  max-width: 380px !important;
+
+  padding: 20px 14px 26px 14px !important;
+  margin-bottom: 0 !important;
+
+
+  backdrop-filter: blur(8px);
+}
+
+/* Header komplett aus */
+header[data-testid="stHeader"] {
+  display: none !important;
+}
+
+/* Inhalt sauber mittig */
+section.main .block-container > div {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  text-align: center !important;
+}
+
+/* Logo: runter + minimal nach rechts (optische Mitte) */
+[data-testid="stImage"] {
+  display: flex !important;
+  justify-content: center !important;
+  width: 100% !important;
+  margin-top: 18px !important;
+  margin-bottom: 0px !important;
+}
+
+[data-testid="stImage"] img {
+  display: block !important;
+  margin: 0 auto !important;
+  transform: translateX(65px);   /* <<< Logo leicht nach rechts */
+}
+
+/* Badges */
 .landing-badges {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  align-items: center;
+  margin-bottom: 40px;
+  margin-top: 0px;
 }
 
 .landing-badge {
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: #ecfeff;
-    color: #0f766e;
-    border: 1px solid #a5f3fc;
+  width: 100%;
+  max-width: 250px;
+  color: #009245;
+  padding: 10px 10px;
+  font-size: 15px;
+  line-height: 1.25;
+  text-align: center;
+  font-weight: bold;
 }
 
-.landing-button-row {
-    display: flex;
-    gap: 10px;
-    margin-top: 8px;
+/* ========== Buttons: klein + Outline (keine Fläche) ========== */
+.stButton {
+  width: 100%;
+  display: flex;
+  justify-content: center;
 }
 
-button.landing-primary {
-    background: linear-gradient(135deg, #22c55e, #16a34a);
-    color: #ffffff;
-    border-radius: 999px;
-    border: none;
-    padding: 8px 20px;
-    font-weight: 600;
-    font-size: 14px;
+/* Base Outline Button */
+.stButton > button {
+  width: auto !important;          /* <<< nicht full-width */
+  min-width: 230px;               /* <<< angenehme Breite */
+  max-width: 320px;
+  font-weight: bold !important;    /* <<< jetzt fett */
+  background: transparent !important;      /* <<< keine Fläche */
+  border: 2px solid #009245 !important;    /* <<< Kontur */
+  color: #009245 !important;               /* <<< grüne Schrift */
+  border-radius: 999px !important;
+  padding: 10px 16px !important;           /* <<< kleiner */
+  font-size: 13px !important;              /* <<< kleiner */
+  box-shadow: none !important;
+  margin-bottom: 10px;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 120ms ease;
 }
 
-button.landing-primary:hover {
-    background: linear-gradient(135deg, #16a34a, #15803d);
+
+
+/* Hover: gelber Hintergrund #F5C400 und weiße Schrift */
+.stButton > button:hover {
+  background: #F5C400 !important;
+  border-color: #F5C400 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  transform: translateY(-1px);
 }
 
-button.landing-secondary {
-    background: #f8fafc;
-    color: #0f172a;
-    border-radius: 999px;
-    border: 1px solid #e2e8f0;
-    padding: 8px 16px;
-    font-weight: 500;
-    font-size: 14px;
+/* Focus */
+.stButton > button:focus,
+.stButton > button:active {
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(0,146,69,0.16) !important;
+  color: #ffffff !important; /* falls Fokusfarbe sichtbar wird */
 }
 
-button.landing-secondary:hover {
-    background: #e2e8f0;
-}
-
-.landing-small {
-    font-size: 12px;
-    color: #94a3b8;
-    margin-top: 10px;
+/* Mobile: Buttons wieder breiter (optional schöner auf kleinsten Screens) */
+@media (max-width: 420px) {
+  .stButton > button {
+    width: 100% !important;
+    max-width: 50px !important;
+  }
 }
 </style>
 """
 
-
 def inject_landing_css() -> None:
-    st.markdown(LANDING_CSS, unsafe_allow_html=True)
+  st.markdown(LANDING_CSS, unsafe_allow_html=True)
