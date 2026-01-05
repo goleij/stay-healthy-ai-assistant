@@ -18,12 +18,13 @@ from plan.plan_generator import (
 # Helpers
 # -------------------------------------------------------------------
 
-# initialize session state for onboarding 
+# initialize session state for onboarding
 def _init_onboarding_state() -> None:
     if "onboarding_step" not in st.session_state:
         st.session_state.onboarding_step = 0
     if "profile_draft" not in st.session_state:
         st.session_state.profile_draft = {}
+
 
 # build a workout schedule distributing workout days evenly
 def _build_workout_schedule(workout_days: int, total_days: int = 7):
@@ -51,6 +52,7 @@ def _build_workout_schedule(workout_days: int, total_days: int = 7):
 
     return schedule
 
+
 # navigation buttons for onboarding steps
 def _nav_buttons(step_back: int, step_next: int, back_key: str, next_key: str) -> None:
     col_back, col_next = st.columns(2)
@@ -66,6 +68,7 @@ def _nav_buttons(step_back: int, step_next: int, back_key: str, next_key: str) -
     if next_clicked:
         st.session_state.onboarding_step = step_next
         st.rerun()
+
 
 # render progress bar for onboarding steps
 def _render_step_progress(step: int) -> None:
@@ -87,7 +90,7 @@ def _render_step_progress(step: int) -> None:
             <div style="
                 width: {percent}%;
                 height: 100%;
-                background: #8bc34a;
+                background: #009245;
             "></div>
         </div>
         """,
@@ -199,7 +202,6 @@ def render_user_form() -> None:
 
     # For steps 0–10 we show the normal card wrapper
     st.markdown('<div class="onboarding-wrapper">', unsafe_allow_html=True)
-    st.title("Stay Healthy AI")
     st.write("")
     _render_step_progress(step)
 
@@ -244,7 +246,6 @@ def render_user_form() -> None:
 
         draft["gender"] = gender
         st.session_state.profile_draft = draft
-
 
         _nav_buttons(1, 3, "step2_back", "step2_next")
         st.markdown("</div>", unsafe_allow_html=True)

@@ -6,8 +6,7 @@ from llm_utils import list_local_models
 
 
 def render_main_page() -> None:
-    """Main page with model selection and either Plan OR Chatbot (no tabs)."""
-    st.title("AI Lifestyle Coach")
+    """Main page that shows either Plan OR Chatbot depending on sidebar selection."""
 
     # -------- Profile check -------- #
     if not st.session_state.get("profile"):
@@ -17,7 +16,7 @@ def render_main_page() -> None:
             st.rerun()
         return
 
-    # -------- Model selection -------- #
+    # -------- Ensure models exist (only validation here) -------- #
     available_models = list_local_models()
     if not available_models:
         st.error(
@@ -26,30 +25,18 @@ def render_main_page() -> None:
         )
         return
 
-    default_model = st.session_state.get("model_name") or available_models[0]
-    try:
-        default_index = available_models.index(default_model)
-    except ValueError:
-        default_index = 0
+    # keep a valid model in session (fallback)
+    if "model_name" not in st.session_state or st.session_state["model_name"] not in available_models:
+        st.session_state["model_name"] = available_models[0]
 
-    model_name = st.selectbox(
-        "Choose a model:",
-        available_models,
-        index=default_index,
-        key="model_select_main",
-    )
-    st.session_state["model_name"] = model_name
-
-    st.write("")
-
-    # -------- Decide which view to show (Plan OR Chatbot) -------- #
-    # this is set in app_ui.py when user clicks "Chat" or "Plan"
+    # -------- Decide which view to show -------- #
     current_view = st.session_state.get("main_view", "plan")
     current_view = (current_view or "plan").lower()
 
+    model_name = st.session_state.get("model_name")
+
     if current_view == "chat":
-        # Only chatbot
         render_chat_tab(model_name)
     else:
-        # Only plan
         render_plan_tab(model_name)
+
