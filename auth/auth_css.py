@@ -196,7 +196,7 @@ div[data-testid="stButton"] > button{
 div[data-testid="stFormSubmitButton"] button:hover,
 .stForm button[type="submit"]:hover{
   background-color: var(--primary-hover) !important;
-  color: var(--text) !important;
+  color: #ffff !important;
 }
 
 /* =========================================================

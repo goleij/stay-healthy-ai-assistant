@@ -130,6 +130,10 @@ current_main_view = st.session_state.get("main_view", "plan")
 
 default_menu = _page_to_menu(current_page, current_main_view)
 default_index = MENU_ITEMS.index(default_menu) if default_menu in MENU_ITEMS else 0
+prev_menu = st.session_state.get("sidebar_menu")
+
+
+
 
 with st.sidebar:
     menu = st.radio(
@@ -155,10 +159,12 @@ else:
     # If user is in onboarding ("form") and chooses another menu item,
     # allow leaving the form and reset the wizard so it starts clean next time.
     if st.session_state.get("page") == "form":
-        # Leaving onboarding -> reset step so it doesn't resume mid-way later
-        st.session_state.onboarding_step = 0
-        _apply_menu(menu)
-        st.rerun()
+        # Nur verlassen, wenn User die Sidebar-Auswahl wirklich geändert hat
+        if menu != prev_menu:
+            st.session_state.onboarding_step = 0
+            _apply_menu(menu)
+            st.rerun()
+        # sonst: im Onboarding bleiben
     else:
         _apply_menu(menu)
 
