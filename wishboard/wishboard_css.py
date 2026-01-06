@@ -150,6 +150,16 @@ div[data-testid="stButton"] > button {
     cursor: pointer !important;
 }
 
+.wishboard-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+
+}
+
+
+
 /* Hover + Click = GELB */
 div[data-testid="stButton"] > button:hover,
 div[data-testid="stButton"] > button:active,
