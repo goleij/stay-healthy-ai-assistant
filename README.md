@@ -7,10 +7,43 @@
 
 To run the project you need a few things.
 
-✅ Python
+-----------------------------------
+Option 1: Run with Docker (suggested)
+-----------------------------------
+
+1. Requirements
+
+- Docker
+- Docker Compose
+- Ollama installed on the host system
+(or running as a separate container)
+
+2. Build & Run
+
+- From the project root:
+    docker compose up --build
+    or (older Docker versions):
+    docker-compose up --build
+
+3. Access the app
+
+Once containers are running:
+
+http://localhost:8501
+
+Notes (Docker)
+
+- Ollama must be running and accessible
+- Models are detected automatically
+
+-----------------------------------
+Option 2: Run with Local Python 
+-----------------------------------
+
+ Python
 ------------
 
-I built and tested this with Python 3.10 / 3.11.
+Python 3.10 / 3.11.
 
 Download Python from:
 
@@ -23,7 +56,7 @@ On Windows, during install, make sure to enable:
 
 Please open the Settings in PyCharm and change the project interpreter to Python 3.11. 
 
-✅ Virtual environment 
+ Virtual environment 
 -----------------------------------
 
 Inside the project folder:
@@ -42,7 +75,7 @@ Then install dependencies:
 
     pip install -r requirements.txt
 
-✅ Ollama
+ Ollama
 ---------
 
 The app uses local LLMs via Ollama.
@@ -57,25 +90,22 @@ Check that it works:
 
 Make sure that Ollama App running in the background.
 
-✅ At least one LLM model
+ At least one LLM model
 -------------------------
 
-You only need one or two models to start. I recommend:
+You must install the following model before running the app:
 
-- gemma2:2b     → lighter, for weaker machines
+    ollama pull gemma2:2b
 
-Example (you can pick a different model if you want):
+This project is built and tested specifically with gemma2:2b.
 
-    ollama pull llama3.2:3b
 
-The app will detect whatever models you have installed.
-
-✅  RAG database
+ RAG database (optional)
 --------------------------
 
-If we want the chatbot to use an external knowledge base (RAG):
+To enable the chatbot's external knowledge base (RAG):
 
-1. We should Put our URLs in:
+1. Add URLs to index:
 
        data/urls.txt
 
@@ -85,10 +115,9 @@ If we want the chatbot to use an external knowledge base (RAG):
 
        python prepare_data.py
 
-This will create :
+This creates:
 
     chroma_db/
-
 
 
 ------------------------------------------------------------
@@ -108,394 +137,439 @@ On the first run:
 - users.json and profiles.json will be created/updated automatically
   when users sign up and save their profiles.
 
-------------------------------------------------------------
-3. Clone & run 
-------------------------------------------------------------
-
-
-    git clone <your-repo-url>.git
-    cd <repo-folder>
-
-    python -m venv .venv
-
-    # Windows:
-    .venv\Scripts\activate
-
-    # macOS / Linux:
-    source .venv/bin/activate
-
-    pip install -r requirements.txt
-
-    # install at least one LLM model for Ollama
-    ollama pull llama3.2:3b
-
-    # (optional) build RAG index
-    python prepare_data.py
-
-    # run the app
-    streamlit run app_ui.py
-
-3.1. Start the voice cloning Server for the meditation and other voice modes
-
-    create venv with python 3.10
-    `cd voice_clone_server
-    python3.10 -m venv .venv
-    source .venv/bin/activate
-    pip install --upgrade pip
-    pip install -r requirements.txt
-    `
-   start the server
-   `uvicorn server:app --host 0.0.0.0 --port 5005
-`
 
 ------------------------------------------------------------
-4. Project structure
+3. Project structure
 ------------------------------------------------------------
 
-This is the current structure of the project:
+This is the current structure of the project.
 
-    app_ui.py
-    app_css.py
-    sidebar_css.py
-    llm_utils.py
-    main.py
-    main_page.py
-    prepare_data.py
-    requirements.txt
-    users.json
-    profiles.json
+Project directory tree:
 
-    auth/
-        __init__.py
-        auth_ui.py
-        auth_manager.py
-        auth_css.py          # CSS for login / signup pages
-
-    landing/
-        __init__.py
-        landing_ui.py
-        landing_css.py      # CSS for Landing Page
-
-    onboarding/
-        __init__.py
-        onboarding_ui.py
-        onboarding_css.py
-
-    chatbot/
-        __init__.py
-        chat_ui.py
-        chat_engine.py
-        chat_css.py          # CSS for chatbot tab
-
-    plan/
-        __init__.py
-        plan_ui.py
-        plan_generator.py
-        plan_css.py          # CSS for form + 7-day plan + plan shopping list
-
-    profile/
-        __init__.py
-        profile_ui.py
-        profile_css.py       # CSS for profile overview page
-        Recepies/
-            __init__.py
-            library_ui.py
-            library_css.py   # CSS for recipes & shopping lists page
-
-    storage/
-        __init__.py
-        file_utils.py
-        profile_manager.py
-
-    data/
-        urls.txt
-
-    chroma_db/
-        chroma.sqlite3       # generated by prepare_data.py
+angewandte-generative-ki/
+│
+├── app_ui.py
+├── app_css.py
+├── sidebar_css.py
+├── llm_utils.py
+├── main.py
+├── main_page.py
+├── prepare_data.py
+├── stt_whisper.py
+├── voice_test.py
+├── requirements.txt
+├── requirements_vcs.txt
+├── users.json
+├── profiles.json
+├── docker-compose.yml
+├── Dockerfile.streamlit
+├── Dockerfile.voice_clone_server
+├── Logo.png
+├── README.md
+│
+├── assets/
+│   └── music/
+│       ├── low.mp3
+│       ├── medium.mp3
+│       └── high.mp3
+│
+├── audio/
+│   ├── __init__.py
+│   ├── audio_session.py
+│   ├── music_mixer.py
+│   ├── recipe_llm.py
+│   ├── recipe_parser.py
+│   └── tts_coqui.py
+│
+├── auth/
+│   ├── __init__.py
+│   ├── auth_ui.py
+│   ├── auth_logic.py
+│   └── auth_css.py
+│
+├── chatbot/
+│   ├── __init__.py
+│   ├── chat_ui.py
+│   └── chat_css.py
+│
+├── components/
+│   ├── __init__.py
+│   ├── silence_component_test.py
+│   └── silence_recorder/
+│       ├── __init__.py
+│       ├── silence_recorder.py
+│       └── frontend/
+│           ├── index.html
+│           └── streamlit.js
+│
+├── data/
+│   └── urls.txt
+│
+├── landing/
+│   ├── __init__.py
+│   ├── landing_ui.py
+│   └── landing_css.py
+│
+├── live_stt_server/
+│   └── __init__.py
+│
+├── meditation/
+│   ├── __init__.py
+│   ├── meditation_ui.py
+│   ├── meditation_logic.py
+│   ├── meditation_css.py
+│   └── ambient/
+│
+├── onboarding/
+│   ├── __init__.py
+│   ├── onboarding_ui.py
+│   └── onboarding_css.py
+│
+├── plan/
+│   ├── __init__.py
+│   ├── plan_ui.py
+│   ├── plan_generator.py
+│   └── plan_css.py
+│
+├── profile/
+│   ├── __init__.py
+│   ├── profile_ui.py
+│   ├── profile_css.py
+│   └── Recepies/
+│       ├── __init__.py
+│       ├── library_ui.py
+│       └── library_css.py
+│
+├── profile_ui/
+│   ├── __init__.py
+│   ├── profile_ui.py
+│   ├── profile_css.py
+│   └── Recepies/
+│       ├── __init__.py
+│       ├── library_ui.py
+│       └── library_css.py
+│
+├── scripts/
+│   ├── index_urls.py
+│   └── index_pdfs.py
+│
+├── storage/
+│   ├── __init__.py
+│   ├── file_utils.py
+│   └── profile_manager.py
+│
+├── tts_server/
+│   ├── Dockerfile
+│   ├── server.py
+│   └── voice_samples/
+│
+├── voice_clone_server/
+│   ├── server.py
+│   ├── README.md
+│   ├── lina-motivation.mp3
+│   ├── lina-motivation.wav
+│   ├── lina-voice-meditation.mp3
+│   └── lina-voice-meditation.wav
+│
+│
+├── wishboard/
+│   ├── __init__.py
+│   ├── urls.txt
+│   ├── wishboard_css.py
+│   ├── wishboard_engine.py
+│   └── wishboard_ui.py
+│
+└── chroma_db/
+    └── chroma.sqlite3   # generated by prepare_data.py
 
 
 ------------------------------------------------------------
 5. What each part does
 ------------------------------------------------------------
 
-Root files
-----------
 
-app_ui.py
-    Main Streamlit entry point.
-    - Sets page config (title, icon, layout).
-    - Shows the sidebar (navigation, logout).
-    - Routes between:
-        - form     → user info form (plan.render_user_form)
-        - main     → main page (main_page.render_main_page)
-        - profile  → profile page (profile.render_profile_page)
-        - library  → recipes & shopping lists
-                     (profile.Recepies.library_ui.render_library_page).
-
-app_css.py
-    Global styling for the root layout (body background, fonts, global buttons, etc.).
-     Imported once at the top of app_ui.py.
-
-sidebar_css.py
-    Styling for the sidebar navigation:
-    Look & feel of the left column (background, borders).
-    Styles for navigation buttons like Profile, Plan, Chat, Settings, Logout.
-
-main_page.py
-    Main content page after login.
-    - Lets me choose the Ollama model.
-    - Shows two tabs:
-        -  Plan     → 7-day plan (plan.render_plan_tab)
-        -  Chatbot  → chat (chatbot.render_chat_tab)
+Root Level Files
+----------------
 
 main.py
-    Backend logic for RAG / knowledge base.
-    - Creates embeddings and a Chroma vector store.
-    - Provides build_rag(...) which llm_utils.py uses.
+    RAG (Retrieval-Augmented Generation) engine. Initializes Chroma vector 
+    database, creates embeddings with Ollama, and builds QA chains for 
+    retrieval-based question answering from indexed documents.
+
+main_page.py
+    Main page router. Checks if user has a profile, validates available 
+    Ollama models, and routes to either the Plan or Chat view.
+
+app_ui.py
+    Main Streamlit application entry point. Configures the page, handles 
+    authentication flow (landing → auth → main app), manages sidebar 
+    navigation between all pages.
+
+app_css.py
+    Global CSS styling. Injects app-wide styles including wave backgrounds, 
+    transparent headers, color variables, button styles, and responsive design.
 
 llm_utils.py
-    Helpers to talk to LLMs.
-    - get_llm(model_name) → streaming Ollama LLM client.
-    - get_qa(model_name)  → RAG QA chain using Chroma + main.py.
+    LLM utility functions. Provides cached Ollama LLM instances, lists 
+    available local models, and manages RAG QA chains per model.
 
 prepare_data.py
-    Script to build the RAG database.
-    - Reads URLs from data/urls.txt.
-    - Fetches and chunks the content.
-    - Creates or updates chroma_db/ with embeddings.
+    Data preparation script. Loads documents (PDFs, CSVs, text files, URLs), 
+    splits them into chunks, and creates a persistent Chroma vector database.
 
-requirements.txt
-    Python dependencies for the app.
+stt_whisper.py
+    Speech-to-Text using Whisper. Converts WebM audio bytes to WAV, then 
+    transcribes using faster-whisper model with VAD filtering.
 
-users.json
-    Local storage for registered users
-    (username, email, hashed password).
+sidebar_css.py
+    Sidebar-specific CSS. Styles sidebar buttons to be compact and mobile-friendly.
+
+voice_test.py
+    Voice activity detection test. Uses WebRTC for real-time audio capture 
+    and VAD to detect speech.
 
 profiles.json
-    Local storage for user profiles and per-user state:
-    - profile info
-    - plan_text (7-day plan)
-    - chat_history
-    - saved_recipes
-    - shopping lists
-    etc.
+    User profiles storage. Stores all user profiles, settings, plans, and chat histories.
+
+users.json
+    User credentials storage. Stores usernames, emails, and bcrypt-hashed passwords.
+
+Logo.png
+    Application logo displayed on the landing page and throughout the app.
 
 
-Landing module (landing/)
-------------------- 
-
-landing_ui.py
-    First page
-    Shows intro screen for “Stay Healthy AI”.
-
-landing_css.py
-    Contains inject_landing_css():
-    Styles the landing.
-    Keeps all landing-page style out of landing_ui.py.
-
-landing/__init__.py
-    Simple package file; can re-export render_landing_page or other helpers.
-
-Auth module (auth/)
--------------------
+auth/ - Authentication Module
+-----------------------------
 
 auth_ui.py
-    UI for login & signup.
-    - Separate views for login and signup.
-    - Validates username, email, password.
-    - On successful login:
-        - sets st.session_state.authenticated = True
-        - loads the user’s saved state.
+    Renders login and signup forms, handles form submission, validates 
+    credentials, and manages session state upon successful login.
 
-auth_manager.py
-    Logic behind authentication.
-    - Loads/saves users from/to users.json.
-    - Hashes passwords with bcrypt.
-    - Verifies credentials on login.
+auth_logic.py
+    Validates email format, handles user signup with bcrypt password hashing, 
+    and login verification (supports username or email login).
 
 auth_css.py
-    Has inject_auth_css() to inject CSS for auth pages.
-    The idea is: no inline styles in auth_ui.py.
+    CSS for login/signup pages including wave backgrounds, form styling, 
+    and button hover effects.
 
-__init__.py
-     exposes a function like show_auth_page()
-    that I call from app_ui.py.
 
-Onboarding module – onboarding/
--------------------
+landing/ - Landing Page Module
+------------------------------
+
+landing_ui.py
+    Displays the app logo, feature badges, and buttons for signup and login.
+
+landing_css.py
+    Fullscreen centered card layout, radial gradient background, and button styling.
+
+
+onboarding/ - Onboarding Wizard Module
+--------------------------------------
 
 onboarding_ui.py
-    Multi-step onboarding wizard.
-    Uses st.session_state.onboarding_step to move through steps 0–10.
-    Collects:
-        name, gender, age,
-        weight, height,
-        allergies, health conditions, physical limitations,
-        fitness level / activity,
-        workouts per week,
-        training intensity,
-        main goal and target kilograms.
-    Stores answers in st.session_state.profile_draft.
-
+    Multi-step onboarding form. Guides users through 10 questions (goal, weight, 
+    height, age, gender, activity level, diet preferences, allergies, health 
+    conditions, workout days). Step 11 generates the personalized 7-day plan.
 
 onboarding_css.py
-    inject_onboarding_css() – styling only for the onboarding wizard.
+    CSS for form layout, progress bar, navigation buttons, and the full-screen 
+    loading overlay shown during plan generation.
 
-onboarding/__init__.py
-    Exports render_user_form.
 
-Chatbot module (chatbot/)
--------------------------
-
-chat_ui.py
-    UI for the chatbot tab.
-    - Shows user/coach chat history.
-    - “Clear chat history” button.
-    - Tools for the last coach answer:
-        - Save as recipe → saved in saved_recipes.
-        - Create shopping list → LLM extracts ingredients.
-    - Builds prompts using:
-        - profile (age, weight, goal, diet, etc.)
-        - health context (diabetes, joint issues, etc.)
-        - recent chat history.
-    - Uses either a normal LLM or the RAG QA chain (get_qa).
-
-chat_engine.py
-    Extra helper logic for the chatbot
-    (prompt templates, future tools, etc.).
-
-chat_css.py
-    Contains inject_chat_css() to style the chatbot UI.
-
-__init__.py
-    Re-exports render_chat_tab for easier import.
-
-Plan module (plan/)
--------------------
+plan/ - Fitness & Diet Plan Module
+----------------------------------
 
 plan_ui.py
-    Has two main views:
-
-    1) render_user_form
-       - Collects:
-         language, goal, target kg,
-         weight, height, age, gender, activity,
-         diet preference, allergies, health conditions.
-       - Saves all into st.session_state.profile.
-       - Resets previous plan/chat state when generating a new plan.
-
-    2) render_plan_tab
-       - Uses make_day_prompt(...) to build prompts for each day.
-       - Streams responses from the LLM.
-       - Normalizes meals + macros format.
-       - Saves the final full 7-day plan into plan_text.
-       - Can generate a weekly shopping list from the whole plan
-         (and stores it in weekly_shopping_list).
+    Shows the generated 7-day plan with expandable days, meal sections, and 
+    "Voice Mode" buttons that generate audio recipe guides with background music.
 
 plan_generator.py
-    Plan generation logic.
-    - make_day_prompt(profile, day_label, is_workout_day)
-      → detailed prompt for that specific day.
-    - normalize_meal_macros(text)
-      → cleans and unifies the format of meals/macros.
+    Builds detailed LLM prompts for each day based on user profile. Handles 
+    special cases like wheelchair users, broken limbs, diabetes, and heart 
+    conditions. Includes post-processing for meal macro normalization and 
+    allergy filtering.
 
 plan_css.py
-    Contains inject_plan_css() and classes like .shopping-item
-    for styling the plan UI and its shopping lists.
+    Styles for Voice Mode buttons, text colors, and expander styling.
 
-__init__.py
-    Re-exports main functions for cleaner imports.
 
-Profile module (profile/)
--------------------------
+chatbot/ - AI Chatbot Module
+----------------------------
+
+chat_ui.py
+    Full-featured chat UI with voice input (using silence detection), 
+    LLM-powered responses, Text-to-Speech output, and chat history management.
+
+chat_css.py
+    CSS for chat layout, message bubbles, input fields, and button styling.
+
+
+meditation/ - Meditation Studio Module
+--------------------------------------
+
+meditation_ui.py
+    Allows users to select meditation style (Mindfulness/Breathing/Sleep), 
+    length, ambient sound (waves/forest/rain), and volume. Creates meditation 
+    audio with cloned voice and saves meditations.
+
+meditation_logic.py
+    Template-based text generation for meditations, TTS synthesis via XTTS 
+    voice cloning server, ambient sound mixing, and meditation persistence.
+
+meditation_css.py
+    Green-themed radio buttons, slider styling, and layout CSS.
+
+
+wishboard/ - Wish Board Module
+------------------------------
+
+wishboard_ui.py
+    Users can write food wishes (e.g., "I want healthy chips"), and the 
+    assistant responds with suggestions.
+
+wishboard_engine.py
+    Search and recipe extraction engine. Loads/saves search indexes, tokenizes 
+    queries, extracts text from HTML, and parses recipe structures.
+
+wishboard_css.py
+    Chat bubble styles, header styling, and input field formatting.
+
+urls.txt
+    URL list for recipe indexing.
+
+
+profile_ui/ - User Profile Module
+---------------------------------
 
 profile_ui.py
-    Profile overview page.
-    - Shows:
-        weight, height, age, gender, activity level, workouts/week.
-    - Shows goal and diet preference.
-    - Shows allergies and health conditions.
-    - “Weekly plan” section:
-        each day (Day 1, Day 2, …) in an expander.
-    - “My plan for today”:
-        automatically picks Day X based on current weekday.
-    - Includes a button to open the recipes & shopping lists page.
+    Displays user avatar with upload/remove, personal info grid (weight, height, 
+    age, gender, activity, workouts), and health information.
 
 profile_css.py
-    Contains inject_profile_css() for profile page styling.
+    CSS for avatar circle, info grid layout, and input field backgrounds.
 
-Recepies/ (inside profile/)
-    library_ui.py
-        render_library_page():
-        - Displays all saved recipes (saved_recipes).
-        - Displays:
-            - weekly shopping list from the 7-day plan
-            - last shopping list generated from the chatbot
-              (with its saved title).
-        - Has a “Back to profile” button.
+Recepies/library_ui.py
+    Displays saved recipes and shopping lists with expandable sections.
 
-    library_css.py
-        Has inject_library_css() for styling the library page.
+Recepies/library_css.py
+    Library page styling for background waves and buttons.
 
-    __init__.py
-        Standard package file. Can re-export render_library_page
-        if I want to import it directly.
 
-__init__.py (in profile/)
-    Exposes render_profile_page and can forward imports
-    for the Recepies submodule if needed.
-
-Storage module (storage/)
--------------------------
-
-file_utils.py
-    Small helpers for safe JSON read/write
-    (used by other modules).
+storage/ - Data Persistence Module
+----------------------------------
 
 profile_manager.py
-    Central place for saving/loading data.
-    - Handles:
-        users.json
-        profiles.json
-    - Manages st.session_state for:
-        profile
-        plan_text
-        chat_history
-        saved_recipes
-        weekly_shopping_list
-        last_shopping_list
-        last_recipe_shopping_title
-    - Functions such as:
-        load_users(), save_users()
-        load_state_for_user(username)
-        save_state_for_current_user()
-        ensure_session_defaults()
+    Loads/saves users and profiles from JSON files, ensures session defaults, 
+    and syncs session state to/from disk.
 
-__init__.py
-    Re-exports profile_manager helpers for shorter imports.
+file_utils.py
+    Simple functions for loading and saving JSON files with error handling.
 
-Data & Chroma
--------------
 
-data/urls.txt
-    List of URLs used for building the RAG knowledge base.
+audio/ - Audio Processing Module
+--------------------------------
 
-chroma_db/chroma.sqlite3
-    Chroma DB file with document embeddings.
-    - Created by prepare_data.py.
-    - Can be deleted and rebuilt at any time.
+audio_session.py
+    Voice-guided cooking session manager. Manages step-by-step audio playback 
+    with voice commands (next, repeat, stop).
 
-------------------------------------------------------------
-6. Styling (CSS)
-------------------------------------------------------------
+music_mixer.py
+    Mixes TTS voice audio with background music, applies volume adjustments 
+    and fade in/out effects.
 
-For each main UI part, I keep CSS in a separate file:
+tts_coqui.py
+    TTS client for recipes. Sends text to the TTS server and returns audio.
 
-    auth/auth_css.py
-    chatbot/chat_css.py
-    plan/plan_css.py
-    profile/profile_css.py
-    profile/Recepies/library_css.py
+recipe_llm.py
+    Uses LLM to generate 5-7 simple cooking steps for voice guidance.
 
-Each *_ui.py calls its inject_*_css() once at the top.
+recipe_parser.py
+    Splits day plan into meals and extracts meal names from plan blocks.
+
+
+components/ - Custom Streamlit Components
+-----------------------------------------
+
+silence_recorder/silence_recorder.py
+    Custom Streamlit component that records audio and auto-stops after 
+    detecting silence. Configurable thresholds for silence detection.
+
+silence_recorder/frontend/
+    HTML/JS frontend for the silence recorder component.
+
+
+voice_clone_server/ - Voice Cloning TTS Server
+----------------------------------------------
+
+server.py
+    FastAPI server that synthesizes speech using XTTS-v2 model with custom 
+    voice samples for meditation and motivation. Splits long texts into 
+    sentences for better synthesis.
+
+
+tts_server/ - Basic TTS Server
+------------------------------
+
+server.py
+    FastAPI server using XTTS for recipe narration with a fixed voice sample.
+
+Dockerfile
+    Docker configuration for the TTS server.
+
+
+scripts/ - CLI Utilities
+------------------------
+
+index_pdfs.py
+    CLI tool to extract text from PDFs, chunk them, and save to a JSON 
+    index for the wishboard search.
+
+index_urls.py
+    CLI tool to index recipe URLs for the wishboard search engine.
+
+
+Docker Configuration
+--------------------
+
+docker-compose.yml
+    Defines three services: voice_clone_server (port 5008), tts_server 
+    (port 5006), and streamlit-app (port 8501).
+
+Dockerfile.streamlit
+    Python 3.11 base, installs FFmpeg and dependencies, runs Streamlit app.
+
+Dockerfile.voice_clone_server
+    Python 3.10 base, installs TTS from source, runs XTTS FastAPI server.
+
+
+Dependencies
+------------
+
+requirements.txt
+    Main app dependencies including Streamlit, LangChain, ChromaDB, Ollama, 
+    bcrypt, BeautifulSoup, pydub, and faster-whisper.
+
+requirements_vcs.txt
+    Voice server dependencies including TTS from Coqui, PyTorch 2.1, 
+    transformers, and FastAPI.
+
+
+Data Folders
+------------
+
+data/
+    Contains source documents (PDFs, CSVs, URLs) for RAG indexing.
+
+assets/music/
+    Background music files for different intensity levels (low, medium, high).
+
+meditation/ambient/
+    Ambient sound files (ocean waves, forest birds, rain).
+
+meditation_data/
+    Saved meditation sessions.
+
+chroma_db/
+    Vector database for RAG, generated by prepare_data.py.
 
