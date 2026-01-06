@@ -7,6 +7,25 @@ def inject_onboarding_css() -> None:
     st.markdown(
         """
         <style>
+        
+        
+        .loading-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #23233C;          /* <-- gewünschte Farbe */
+            text-align: center;
+            margin-bottom: 20px;
+            line-height: 1.3;
+        }
+        
+        @media (max-width: 480px) {
+            .loading-title {
+                font-size: 1.1rem;
+                margin-bottom: 16px;
+            }
+        }
+
+        
         /* Wrapper for onboarding page */
         .onboarding-wrapper {
             max-width: 480px;
