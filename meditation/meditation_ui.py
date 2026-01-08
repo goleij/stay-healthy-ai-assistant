@@ -212,7 +212,7 @@ def _render_saved_meditations() -> None:
                     st.session_state.med_title = item["title"]
                     st.success("Loaded into the editor on the *New Meditation* page.")
             with cols[1]:
-                if st.button("🗑 Delete", key=f"del_{slug}"):
+                if st.button("Delete", key=f"del_{slug}"):
                     delete_meditation(slug)
                     st.experimental_rerun()
 

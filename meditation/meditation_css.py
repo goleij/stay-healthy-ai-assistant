@@ -402,7 +402,26 @@ button[data-testid="baseButton"][aria-label="Gespeicherte Meditationen"] {
     justify-content: center;
 }
 
+span.st-emotion-cache-zkd0x0 {
+    font-family: 'Material Symbols Rounded' !important;
+}
 
+.stRadio [data-baseweb="radio"] > div[aria-checked="true"] {
+    border-color: #009245 !important;
+}
+.stRadio [data-baseweb="radio"] > div[aria-checked="true"] svg {
+    color: #009245 !important;
+    fill: #009245 !important;
+}
+.stRadio [data-baseweb="radio"] > div[aria-checked="true"] circle {
+    fill: #009245 !important;
+    stroke: #009245 !important;
+}
+.stRadio [data-baseweb="radio"] label {
+    color: #23233a !important;
+    font-weight: 700 !important;
+    font-size: 14px !important;   /* compact labels */
+}
 
 </style>
 """
