@@ -118,7 +118,7 @@ def _render_new_meditation() -> None:
         st.session_state.med_text = text
         st.session_state.med_last_error = None
 
-        with st.spinner("Creating audio with your cloned voice…"):
+        with st.spinner("Creating meditation…"):
             audio_bytes, err = create_meditation_audio(
                 text,
                 cfg.ambient_style,
