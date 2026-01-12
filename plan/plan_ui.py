@@ -16,6 +16,7 @@ from .plan_css import inject_plan_css, inject_plan_toggle_css
 
 from audio.recipe_parser import extract_meal_item, split_meals
 from audio.recipe_llm import generate_recipe_steps
+from audio.workout_llm import generate_workout_steps
 from audio.tts_coqui import speak
 from audio.music_mixer import mix_tts_with_music
 
@@ -114,12 +115,19 @@ def _render_plan_by_day(markdown_text: str, label: str):
 
                 if st.button("Voice Mode", key=btn_key):
                     with st.spinner("Voice Mode wird erstellt und vertont …"):
-                        meal_item = extract_meal_item(meal_block)
+                        if label == "Workout":
+                            steps = generate_workout_steps(
+                                model_name=st.session_state["model_name"],
+                                workout_text=meal_block,            
+                                profile=st.session_state["profile"], 
+                            )
+                        else:
+                            meal_item = extract_meal_item(meal_block)
+                            steps = generate_recipe_steps(
+                                model_name=st.session_state["model_name"],
+                                meal_item=meal_item,
+                                )
 
-                        steps = generate_recipe_steps(
-                            model_name=st.session_state["model_name"],
-                            meal_item=meal_item,
-                        )
 
                         if not steps:
                             st.error("Voice Mode konnte nicht generiert werden.")
