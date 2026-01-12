@@ -699,10 +699,19 @@ Assistant:
                 system_instructions = (
                     "You are an expert fitness and nutrition coach. "
                     "Use the profile information and health context to give safe, personalized advice. "
-                    "When the user asks for meals or recipes, always adapt them to their diet preference, "
+                    "When the user asks for meals or recipes, adapt them ONLY to the user's explicitly stated "
                     "health conditions and allergies. "
+                    "Do NOT introduce additional dietary restrictions unless explicitly requested "
+                    "(e.g. gluten-free, dairy-free, keto). "
+                    "IMPORTANT DIABETES RULES: "
+                    "If the user has diabetes, NEVER include added sugar, honey, syrup, or regular sugar, "
+                    "even as optional ingredients. "
+                    "For diabetes, NEVER use all-purpose flour or white flour. "
+                    "Use low-glycemic alternatives such as almond flour, coconut flour, or oat fiber. "
                     "Be concise and precise. This is general information, not medical advice. "
                 )
+
+
 
                 if wants_recipe:
                     system_instructions += (
@@ -713,6 +722,10 @@ Assistant:
                         "- A bullet list of ingredients with exact amounts.\n"
                         "- A numbered list of clear, step-by-step instructions.\n"
                         "Do NOT ask the user any questions.\n"
+                        "STRICT RULE: If diabetes is present, the recipe name MUST include "
+                        "'Sugar-Free' or 'Low-Glycemic'. "
+                        "Do NOT include optional sugar or refined flour in any form.\n"
+
                     )
 
                 system_instructions += language_instruction + "\n"
