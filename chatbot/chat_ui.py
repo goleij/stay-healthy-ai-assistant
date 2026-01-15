@@ -49,6 +49,13 @@ except Exception:
             return {"result": f"(dummy QA result for {name})"}
         return qa_call
 
+def wants_weekly_plan(text: str) -> bool:
+    t = (text or "").lower()
+    weekly_keywords = [
+        "week", "weekly", "plan", "program", "schedule",
+        "days per week", "per week", "3 days", "4 days", "5 days"
+    ]
+    return any(k in t for k in weekly_keywords)
 
 # ---------------------------
 # Voice imports 
@@ -131,6 +138,67 @@ def collect_stream_to_text(token_iter: Iterator[str]) -> str:
         out += str(token)
     return out.strip()
 
+# ---------------------------
+# Mobility-safe exercise allowlist + rewrite
+# ---------------------------
+ALLOWED_EXERCISES = [
+    "Wall push-up",
+    "Incline wall push-up",
+    "Seated band row (band anchored in front)",
+    "Seated chest press (band)",
+    "Seated shoulder press (band/dumbbells)",
+    "Biceps curl (band/dumbbells)",
+    "Triceps extension (band/dumbbells)",
+    "Lateral raise (light)",
+    "Face pull (band)",
+    "Seated scapular retractions",
+    "Seated posture holds (tall spine)",
+    "Seated core bracing",
+    "Seated Pallof press (band)",
+    "Seated torso rotations (controlled)",
+    "Upper-back mobility (shoulder rolls, thoracic rotations seated)",
+    "Breathing (nasal) + bracing",
+]
+
+def _mobility_guard_prompt(allowed: list[str], original_answer: str) -> str:
+    allowed_list = "\n".join(f"- {x}" for x in allowed)
+    return f"""
+Rewrite the answer to be SAFE and still helpful.
+
+Hard rules:
+- Do NOT mention wheelchair, disability, mobility aids, or limitations.
+- Do NOT suggest any leg/lower-body exercises or activities (no squats/lunges/deadlifts/leg press/running/jumping/cycling).
+- Do NOT suggest floor-based positions (no planks/bear crawls).
+- Do NOT suggest dips.
+- ONLY use exercises from the Allowed Exercises List below (do not invent new exercise names).
+- Keep it direct and actionable. Do NOT ask questions.
+
+Allowed Exercises List:
+{allowed_list}
+
+Original answer:
+{original_answer}
+
+Safe rewritten answer:
+""".strip()
+
+def enforce_mobility_safety_with_rewrite(model_name: str, text: str) -> str:
+    """
+    If answer contains unsafe items, ask the LLM to rewrite safely using the allowlist.
+    This avoids hard-coded repeated answers.
+    """
+    if not text:
+        return text
+    if not _contains_lower_body_or_non_wheelchair_safe(text):
+        return text
+
+    try:
+        llm = get_llm(model_name)
+        fix_prompt = _mobility_guard_prompt(ALLOWED_EXERCISES, text)
+        fixed = collect_stream_to_text(llm.stream(fix_prompt)).strip()
+        return fixed or text
+    except Exception:
+        return text
 
 
 
@@ -210,6 +278,61 @@ def _build_health_context(profile: dict) -> str:
     if not rules:
         return ""
     return "Health and safety context:\n" + "\n".join(f"- {r}" for r in rules) + "\n"
+
+def _build_mobility_context(profile: dict) -> str:
+    mobility = (profile.get("mobility") or "").strip().lower()
+    uses_wheelchair = bool(profile.get("uses_wheelchair"))
+    health_issues = (profile.get("health_issues") or "").strip().lower()
+
+    text = f"{mobility} {health_issues}"
+
+    rules = []
+    if uses_wheelchair or "wheelchair" in text or "wheel chair" in text:
+        rules.append("Lower-body training is not suitable for the user.")
+        rules.append("Hard rule: do NOT suggest any leg/lower-body exercises or running/jumping/cycling.")
+        rules.append("Avoid floor-based positions (e.g., planks/bear crawls) and dips.")
+        rules.append("Prefer seated or upper-body focused options.")
+        rules.append("Do NOT mention mobility aids or label the routine (no wheelchair mention).")
+
+    if not rules:
+        return ""
+    return "Mobility & safety context:\n" + "\n".join(f"- {r}" for r in rules) + "\n"
+
+
+
+def _contains_lower_body_or_non_wheelchair_safe(text: str) -> bool:
+    t = (text or "").lower()
+
+    banned = [
+        # lower body / legs
+        "squat", "squats", "lunge", "lunges", "deadlift", "deadlifts",
+        "leg press", "calf raise", "calf raises", "hamstring", "quadriceps", "quad", "glute",
+        "leg extension", "leg curl", "step-up", "step ups", "running", "run", "jump", "jumping",
+        "cycling", "bike", "treadmill", "elliptical", "stairmaster", "stairs",
+
+        # moves that often require legs / floor support
+        "plank", "push-up position", "bear crawl",
+
+        # risky for many wheelchair users (shoulder overload)
+        "chair dip", "chair dips", "dips"
+    ]
+
+    return any(b in t for b in banned)
+
+def remove_banned_sentences(text: str) -> str:
+    if not text:
+        return text
+
+    parts = re.split(r'(?<=[.!?])\s+|\n+', text.strip())
+    kept = []
+    for p in parts:
+        if not p.strip():
+            continue
+        if _contains_lower_body_or_non_wheelchair_safe(p):
+            continue
+        kept.append(p.strip())
+
+    return "\n".join(kept).strip()
 
 
 def _get_last_coach_message() -> Optional[str]:
@@ -569,6 +692,9 @@ def render_chat_tab(passed_model_name: Optional[str] = None):
             assistant_idx = len(st.session_state.chat_history) - 1
 
             context = _build_history_text(max_turns=4)
+            profile = st.session_state.get("profile", {})
+            mobility_context = _build_mobility_context(profile)
+
 
             voice_prompt = f"""
 You are a voice-only fitness & nutrition coach.
@@ -587,6 +713,9 @@ If the user asks about an exercise:
 - Each sentence must be a complete instruction.
 If the user asks multiple things:
 - Answer only the main request.
+
+{mobility_context}
+
 
 Conversation:
 {context}
@@ -614,6 +743,10 @@ Assistant:
                 st.rerun()
 
             reply = (reply or "").strip()
+            if mobility_context:
+                reply = enforce_mobility_safety_with_rewrite(model_name, reply)
+
+
 
             
             if not reply:
@@ -690,10 +823,15 @@ Assistant:
                     f"height {profile.get('height')} cm. "
                     f"Main goal: {profile.get('goal')}, target change: {profile.get('target_change', 0)} kg. "
                     f"Activity level: {profile.get('activity')}, diet preference: {profile.get('diet')}. "
-                    f"They want to work out about {profile.get('workout_days', 3)} days per week.\n"
                 )
+                
+                if wants_weekly_plan(text):
+                    profile_context += f"They want to work out about {profile.get('workout_days', 3)} days per week.\n"
+                else:
+                    profile_context += "The user wants a single workout session only (not a weekly plan).\n"
 
                 health_context = _build_health_context(profile)
+                mobility_context = _build_mobility_context(profile)
                 history_text = _build_history_text(max_turns=6)
 
                 system_instructions = (
@@ -710,6 +848,20 @@ Assistant:
                     "Use low-glycemic alternatives such as almond flour, coconut flour, or oat fiber. "
                     "Be concise and precise. This is general information, not medical advice. "
                 )
+
+                if mobility_context:
+                    system_instructions += (
+                        "MOBILITY HARD RULES: "
+                        "Never suggest leg/lower-body exercises or activities (no squats/lunges/deadlifts/leg press/running/jumping/cycling). "
+                        "Never suggest floor-based positions (no planks/bear crawls). "
+                        "Never suggest dips. "
+                        "Do not mention wheelchair or mobility aids. "
+                        "If the user asks for legs/lower-body training, refuse briefly and give upper-body alternatives.\n"
+                        "When suggesting exercises, ALWAYS include sets x reps (or seconds). "
+                        "Use a simple format like: Exercise — 2–3 sets of 8–12 reps.\n"
+
+                    )
+
 
 
 
@@ -730,7 +882,7 @@ Assistant:
 
                 system_instructions += language_instruction + "\n"
 
-                full_prompt = system_instructions + "\n" + profile_context + health_context
+                full_prompt = system_instructions + "\n" + profile_context + health_context + mobility_context
                 if history_text:
                     full_prompt += f"\nConversation so far:\n{history_text}\n"
                 full_prompt += f"\nUser: {text}\nCoach:"
@@ -750,6 +902,14 @@ Assistant:
                 except Exception as e:
                     st.error(f"Unexpected error: {e}")
                     st.stop()
+
+                answer = (answer or "").strip()
+
+                if mobility_context:
+                    answer = enforce_mobility_safety_with_rewrite(model_name, answer)
+
+
+
 
                 st.session_state.chat_history.append(("user", text))
                 st.session_state.chat_history.append(("coach", answer))
